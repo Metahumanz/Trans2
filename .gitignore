@@ -1,0 +1,10 @@
+.build/
+.build-tools/
+dist/
+Trans2.app/
+.testhome/
+*.dmg
+*.xcodeproj
+.DS_Store
+
+build/
