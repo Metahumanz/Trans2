@@ -13,6 +13,8 @@ whisper.cpp 转写能力和 [AItrans](../AItrans) 的字幕翻译内核合成一
 
 文件不离开本机完成转写；只有翻译这一步会把字幕文本发给你选择的模型服务。
 
+[最新发布](https://github.com/Metahumanz/Trans2/releases) · [更新日志](CHANGELOG.md)
+
 ## 界面
 
 窗口按操作顺序分成三块：
