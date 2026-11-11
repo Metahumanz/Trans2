@@ -138,11 +138,122 @@ private struct GeneralSettingsTab: View {
                 .padding(.vertical, 4)
             }
 
+            GroupBox(L.tr("settings.updates")) {
+                VStack(alignment: .leading, spacing: 10) {
+                    LabeledRow(title: L.tr("settings.current_version")) {
+                        Text("v\(model.appVersion)")
+                            .font(.callout.monospaced())
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    Toggle(L.tr("settings.auto_check_updates"), isOn: $model.autoCheckUpdates)
+
+                    HStack(spacing: 10) {
+                        Button(L.tr("settings.check_updates")) {
+                            model.checkForUpdates()
+                        }
+                        .disabled(model.isCheckingForUpdates)
+
+                        if model.isCheckingForUpdates {
+                            ProgressView().controlSize(.small)
+                        }
+                        Text(model.updateStatusText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+
+                    if let info = model.updateInfo {
+                        Divider()
+                        Text(L.tr("settings.update_available", info.version))
+                            .font(.headline)
+                        if !info.notes.isEmpty {
+                            ScrollView {
+                                Text(plainNotes(info.notes))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .textSelection(.enabled)
+                            }
+                            .frame(maxHeight: 150)
+                        }
+                        HStack(spacing: 10) {
+                            Button(L.tr("settings.download_update")) {
+                                model.downloadUpdate()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(model.isDownloadingUpdate)
+
+                            Button(L.tr("settings.open_release_page")) {
+                                model.openUpdatePage()
+                            }
+                            .buttonStyle(.bordered)
+
+                            if model.isDownloadingUpdate {
+                                ProgressView().controlSize(.small)
+                            }
+                        }
+                    }
+
+                    if model.downloadedUpdate != nil {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(Color(nsColor: .systemGreen))
+                            Text(model.updateStatusText)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                            Spacer()
+                            Button(L.tr("settings.show_download")) {
+                                model.revealDownloadedUpdate()
+                            }
+                            .font(.caption)
+                        }
+                    }
+
+                    DisclosureGroup(L.tr("settings.private_repo")) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            SecureField(L.tr("settings.github_token"), text: $model.githubUpdateToken)
+                                .textFieldStyle(.roundedBorder)
+                            Text(L.tr("settings.github_token_hint"))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.top, 4)
+                    }
+                    .font(.caption)
+                }
+                .padding(.vertical, 4)
+            }
+
             Text(L.tr("settings.privacy_note"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// SwiftUI's Text only understands inline Markdown; keep the generated
+    /// release notes readable by dropping block markers but preserving lines.
+    private func plainNotes(_ notes: String) -> String {
+        notes.components(separatedBy: .newlines).map { raw in
+            var line = raw
+            line = line.replacingOccurrences(of: #"^#{1,6}\s+"#, with: "", options: .regularExpression)
+            line = line.replacingOccurrences(of: #"^---+$"#, with: "", options: .regularExpression)
+            line = line.replacingOccurrences(of: "**", with: "")
+            line = line.replacingOccurrences(of: "`", with: "")
+            line = line.replacingOccurrences(of: #"^_(.+)_$"#, with: "$1", options: .regularExpression)
+            line = line.replacingOccurrences(
+                of: #"\[([^\]]+)\]\([^)]+\)"#,
+                with: "$1",
+                options: .regularExpression
+            )
+            return line
+        }
+        .joined(separator: "\n")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

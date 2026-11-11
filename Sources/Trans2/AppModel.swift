@@ -66,6 +66,17 @@ final class AppModel: ObservableObject {
             }
         }
     }
+    @Published var autoCheckUpdates: Bool {
+        didSet { defaults.set(autoCheckUpdates, forKey: Keys.autoCheckUpdates) }
+    }
+    @Published var githubUpdateToken: String {
+        didSet { persistUpdateToken() }
+    }
+    @Published private(set) var updateInfo: UpdateInfo?
+    @Published private(set) var isCheckingForUpdates = false
+    @Published private(set) var isDownloadingUpdate = false
+    @Published private(set) var updateStatusText = ""
+    @Published private(set) var downloadedUpdate: URL?
     @Published private(set) var providers: [Provider] = []
     @Published private(set) var activeProviderID: String?
     @Published private(set) var lastTranslationCount = 0
@@ -110,6 +121,7 @@ final class AppModel: ObservableObject {
 
     private let defaults: UserDefaults
     private let providerStore: ProviderStore
+    private let updateSecrets: FileSecretStore
     private let supportDirectory: URL
     private let vadModelSearchRoots: [URL]?
     private let huggingFaceEnvironment: [String: String]
@@ -149,6 +161,7 @@ final class AppModel: ObservableObject {
         self.completionNotifier = completionNotifier ?? CompletionNotifier()
         self.defaults = defaults
         self.supportDirectory = supportDirectory
+        self.updateSecrets = FileSecretStore(path: supportDirectory.appending(path: "secrets.json"))
         self.providerStore = providerStore
             ?? ProviderStore(secrets: FileSecretStore(path: supportDirectory.appending(path: "secrets.json")))
         self.vadModelSearchRoots = vadModelSearchRoots
@@ -195,6 +208,8 @@ final class AppModel: ObservableObject {
             : WhisperLanguage.autoCode
 
         inputFiles = []
+        autoCheckUpdates = defaults.object(forKey: Keys.autoCheckUpdates) as? Bool ?? true
+        githubUpdateToken = (try? updateSecrets.secret(for: Self.updateTokenKey)) ?? ""
         appLanguage = AppLanguage(storedValue: defaults.string(forKey: Keys.appLanguage))
         outputDirectoryPath = defaults.string(forKey: Keys.outputDirectoryPath) ?? ""
         whisperCLIPath = initialWhisperCLIPath
@@ -233,6 +248,20 @@ final class AppModel: ObservableObject {
         if storedTranslationSettings == nil, !providers.isEmpty {
             translationSettings.isEnabled = true
         }
+
+        if autoCheckUpdates {
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(3))
+                guard let self, self.autoCheckUpdates else { return }
+                self.checkForUpdates(manual: false)
+            }
+        }
+
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["TRANS2_DEBUG_CHECK_UPDATES"] == "1" {
+            checkForUpdates()
+        }
+        #endif
 
         #if DEBUG
         if let raw = ProcessInfo.processInfo.environment["TRANS2_DEBUG_TRANSLATION_TIMING"],
@@ -297,6 +326,86 @@ final class AppModel: ObservableObject {
             translationModelReady: translationModelName.isEmpty == false,
             hasMediaInputs: !inputMediaFiles.isEmpty
         )
+    }
+
+    // MARK: - Updates
+
+    private static let updateTokenKey = "github-update"
+
+    var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
+    }
+
+    private var updateToken: String? {
+        let trimmed = githubUpdateToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func persistUpdateToken() {
+        do {
+            if let token = updateToken {
+                try updateSecrets.setSecret(token, for: Self.updateTokenKey)
+            } else {
+                try updateSecrets.deleteSecret(for: Self.updateTokenKey)
+            }
+        } catch {
+            appendLog(L.tr("settings.update_token_error", error.localizedDescription))
+        }
+    }
+
+    func checkForUpdates(manual: Bool = true) {
+        guard !isCheckingForUpdates else { return }
+        isCheckingForUpdates = true
+        updateStatusText = L.tr("settings.checking_updates")
+
+        Task {
+            defer { isCheckingForUpdates = false }
+            do {
+                let checker = UpdateChecker(token: updateToken)
+                if let info = try await checker.check() {
+                    updateInfo = info
+                    updateStatusText = ""
+                } else {
+                    updateInfo = nil
+                    updateStatusText = L.tr("settings.up_to_date", appVersion)
+                }
+            } catch {
+                updateInfo = nil
+                if manual {
+                    updateStatusText = error.localizedDescription
+                } else {
+                    updateStatusText = ""
+                }
+            }
+        }
+    }
+
+    func downloadUpdate() {
+        guard let updateInfo, !isDownloadingUpdate else { return }
+        isDownloadingUpdate = true
+        updateStatusText = L.tr("settings.downloading_update")
+
+        Task {
+            defer { isDownloadingUpdate = false }
+            do {
+                let file = try await UpdateDownloader.download(updateInfo, token: updateToken)
+                downloadedUpdate = file
+                updateStatusText = L.tr("settings.update_downloaded", file.path)
+                NSWorkspace.shared.activateFileViewerSelecting([file])
+            } catch {
+                updateStatusText = error.localizedDescription
+            }
+        }
+    }
+
+    func openUpdatePage() {
+        guard let url = updateInfo?.pageURL else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    func revealDownloadedUpdate() {
+        guard let url = downloadedUpdate, FileManager.default.fileExists(atPath: url.path) else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
     // MARK: - Translation configuration
@@ -2000,6 +2109,7 @@ private enum Keys {
     static let huggingFaceDownloadSource = "huggingFaceDownloadSource"
     static let customHuggingFaceEndpoint = "customHuggingFaceEndpoint"
     static let translationSettings = "translationSettings"
+    static let autoCheckUpdates = "autoCheckUpdates"
 }
 
 private enum HuggingFaceDownloadError: LocalizedError {
