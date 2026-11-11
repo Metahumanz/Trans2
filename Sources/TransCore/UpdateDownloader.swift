@@ -11,22 +11,14 @@ public enum UpdateDownloader {
             ?? FileManager.default.temporaryDirectory
     }
 
-    /// 下载更新包，返回落盘位置。私有仓库需要传只读 Token。
+    /// 下载更新包，返回落盘位置。
     public static func download(
         _ info: UpdateInfo,
-        token: String? = nil,
         into directory: URL = downloadsDirectory
     ) async throws -> URL {
-        let token = token?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let useAPI = token?.isEmpty == false
-        let url = useAPI ? (info.apiDownloadURL ?? info.downloadURL) : info.downloadURL
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: info.downloadURL)
         request.timeoutInterval = 60
         request.setValue("Trans2", forHTTPHeaderField: "User-Agent")
-        if let token, !token.isEmpty {
-            request.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
         let (temporary, response) = try await URLSession.shared.download(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw AITransError("下载失败，请稍后重试或打开下载页。")

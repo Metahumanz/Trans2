@@ -457,7 +457,3 @@
 "settings.open_release_page" = "リリースページを開く";
 "settings.update_downloaded" = "%@ にダウンロードしました";
 "settings.show_download" = "Finder に表示";
-"settings.private_repo" = "プライベートリポジトリの更新";
-"settings.github_token" = "GitHub トークン";
-"settings.github_token_hint" = "プライベートリポジトリでは匿名リクエストが 404 になります。Contents: Read の読み取り専用 Fine-grained token を作成して入力してください。公開リポジトリでは空欄で構いません。トークンはローカルの secrets.json に保存されます。";
-"settings.update_token_error" = "GitHub トークンを保存できませんでした: %@";

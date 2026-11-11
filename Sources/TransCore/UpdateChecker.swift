@@ -7,21 +7,12 @@ public struct UpdateInfo: Sendable, Equatable {
     public let notes: String
     public let downloadURL: URL
     public let pageURL: URL
-    /// GitHub API asset URL; private repositories need this plus a token.
-    public let apiDownloadURL: URL?
 
-    public init(
-        version: String,
-        notes: String,
-        downloadURL: URL,
-        pageURL: URL,
-        apiDownloadURL: URL? = nil
-    ) {
+    public init(version: String, notes: String, downloadURL: URL, pageURL: URL) {
         self.version = version
         self.notes = notes
         self.downloadURL = downloadURL
         self.pageURL = pageURL
-        self.apiDownloadURL = apiDownloadURL
     }
 }
 
@@ -29,19 +20,15 @@ public struct UpdateChecker: Sendable {
     public let repository: String
     /// 优先下载的资产后缀，按顺序匹配；都没有时回退到 .zip。
     public let preferredExtensions: [String]
-    /// 私有仓库的只读 Token；公开仓库留空即可。
-    public let token: String?
     private let session: URLSession
 
     public init(
         repository: String = "Metahumanz/Trans2",
         preferredExtensions: [String] = [".dmg"],
-        token: String? = nil,
         session: URLSession = .shared
     ) {
         self.repository = repository
         self.preferredExtensions = preferredExtensions
-        self.token = token
         self.session = session
     }
 
@@ -58,23 +45,13 @@ public struct UpdateChecker: Sendable {
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
         request.setValue("Trans2", forHTTPHeaderField: "User-Agent")
-        if let token, !token.isEmpty {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
         request.timeoutInterval = 20
 
         let (data, response) = try await session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 else {
             if status == 404 {
-                throw AITransError(
-                    token?.isEmpty == false
-                        ? "仓库还没有发布版本，或 Token 没有读取 Release 的权限。"
-                        : "仓库是私有的，匿名检查会返回 404；请填写只读 GitHub Token，或把仓库设为公开。"
-                )
-            }
-            if status == 401 || status == 403 {
-                throw AITransError("GitHub Token 无效或没有读取 Release 的权限。")
+                throw AITransError("仓库还没有发布版本。")
             }
             throw AITransError("检查更新失败（HTTP \(status)）。")
         }
@@ -101,12 +78,12 @@ public struct UpdateChecker: Sendable {
         guard !tag.isEmpty else { throw AITransError("更新信息缺少版本号。") }
         let notes = root["body"] as? String ?? ""
         let assets = root["assets"] as? [[String: Any]] ?? []
-        let named = assets.compactMap { asset -> (name: String, browser: String, api: String?)? in
+        let named = assets.compactMap { asset -> (name: String, browser: String)? in
             guard
                 let name = asset["name"] as? String,
                 let url = asset["browser_download_url"] as? String
             else { return nil }
-            return (name, url, asset["url"] as? String)
+            return (name, url)
         }
         let preferred = preferredExtensions.lazy
             .compactMap { ext in named.first { $0.name.lowercased().hasSuffix(ext.lowercased()) } }
@@ -120,13 +97,7 @@ public struct UpdateChecker: Sendable {
         }
 
         guard isNewer(tag, than: currentVersion) else { return nil }
-        return UpdateInfo(
-            version: tag,
-            notes: notes,
-            downloadURL: download,
-            pageURL: page,
-            apiDownloadURL: asset.flatMap { $0.api.flatMap(URL.init(string:)) }
-        )
+        return UpdateInfo(version: tag, notes: notes, downloadURL: download, pageURL: page)
     }
 
     /// 语义化版本比较；非数字段按字符串比较。
