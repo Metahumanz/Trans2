@@ -1,5 +1,8 @@
 # Third-party notices
 
+Trans2 itself is licensed under the GNU General Public License v3.0
+or later (GPL-3.0-or-later). See `LICENSE` for the full text.
+
 Trans2 combines two local projects and builds on:
 
 - **whisper.cpp** (MIT) — https://github.com/ggml-org/whisper.cpp

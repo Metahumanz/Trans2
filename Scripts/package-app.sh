@@ -94,6 +94,7 @@ done < <(find "$RUNTIME/bin" -type f \( -name 'whisper-cli' -o -name '*.dylib' \
 
 [ -f "$ICON" ] && cp "$ICON" "$RESOURCES/AppIcon.icns"
 [ -f "$ROOT/README.md" ] && cp "$ROOT/README.md" "$RESOURCES/README.md"
+[ -f "$ROOT/LICENSE" ] && cp "$ROOT/LICENSE" "$RESOURCES/LICENSE"
 [ -f "$ROOT/THIRD_PARTY_NOTICES.md" ] && cp "$ROOT/THIRD_PARTY_NOTICES.md" "$RESOURCES/"
 
 cat > "$CONTENTS/Info.plist" <<PLIST
@@ -162,6 +163,8 @@ cat > "$CONTENTS/Info.plist" <<PLIST
   <string>14.0</string>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>NSHumanReadableCopyright</key>
+  <string>Copyright © 2026 Metahumanz. GPL-3.0-or-later.</string>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
   <key>NSAppTransportSecurity</key>

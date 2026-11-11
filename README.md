@@ -4,7 +4,7 @@
 
 本地转写，AI 翻译，一条流水线。把音视频或字幕丢进来，得到一份可以直接用的双语字幕。
 
-[下载最新版](https://github.com/Metahumanz/Trans2/releases) · [更新日志](CHANGELOG.md)
+[下载最新版](https://github.com/Metahumanz/Trans2/releases) · [更新日志](CHANGELOG.md) · [GPLv3](LICENSE)
 
 ```
 音视频 ──afconvert──▶ whisper.cpp ──▶ SRT ──▶ OpenAI 兼容 API / Ollama ──▶ 双语 SRT
@@ -195,9 +195,10 @@ git push origin main --tags
 
 ## 来源与许可
 
+- **Trans2 本身以 GNU General Public License v3.0 or later 发布**，完整文本见 [LICENSE](LICENSE)。
 - 转写壳与 whisper.cpp 集成来自 **WhisperMac**（MIT）。
 - 翻译提示词、提供商存储与润色流水线来自作者自己的 **AItrans**。
 - whisper.cpp 为 MIT；Silero VAD 模型按需下载。
-- 本仓库公开，但尚未添加开源许可证文件；如需复用代码，请先联系作者。
+- 第三方组件保留各自许可证，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
-第三方声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+GPLv3 允许你运行、研究、修改和再分发 Trans2；再分发修改版时需要保留同样的自由，并提供对应源代码。
