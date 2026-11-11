@@ -121,3 +121,10 @@ struct TranslationPipelineTests {
         #expect(settings.ollamaModel == "qwen2.5")
     }
 }
+
+@Test
+func settingsDecodeTranslationTiming() throws {
+    let data = Data(#"{"isEnabled":true,"timing":"duringTranscription"}"#.utf8)
+    let decoded = try JSONDecoder().decode(TranslationSettings.self, from: data)
+    #expect(decoded.timing == .duringTranscription)
+}

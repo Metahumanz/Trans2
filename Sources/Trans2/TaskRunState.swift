@@ -14,6 +14,8 @@ enum ActiveRunPhase: Equatable {
     /// `currentIndex` is the 0-based index reported by `onInputStageChange`.
     case preparingInputs(currentIndex: Int, total: Int)
     case transcribingBatch(totalFiles: Int)
+    /// Translation is overlapping transcription file by file.
+    case pipelined(currentIndex: Int, totalFiles: Int, translatedFiles: Int)
     /// Translation runs after the transcript batch; `currentIndex` is 0-based.
     case translatingFiles(currentIndex: Int, totalFiles: Int)
     /// User requested cancellation; stays until the task actually ends.
@@ -123,6 +125,12 @@ enum TaskPresentation {
                 return .running(.preparingInputs(currentIndex: currentIndex, total: total))
             case let .transcribingBatch(totalFiles):
                 return .running(.transcribingBatch(totalFiles: totalFiles))
+            case let .pipelined(currentIndex, totalFiles, translatedFiles):
+                return .running(.pipelined(
+                    currentIndex: currentIndex,
+                    totalFiles: totalFiles,
+                    translatedFiles: translatedFiles
+                ))
             case let .translatingFiles(currentIndex, totalFiles):
                 return .running(.translatingFiles(currentIndex: currentIndex, totalFiles: totalFiles))
             case .stopping:

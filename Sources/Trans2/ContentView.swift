@@ -41,19 +41,26 @@ struct MainWindowContent: View {
     @State private var presentedSheet: PresentedSheet?
     @State private var isClearHistoryConfirmationPresented = false
 
-    enum PresentedSheet: String, Identifiable {
-        case settings
+    enum PresentedSheet: Identifiable {
+        case settings(SettingsTab)
         case history
         case logs
         case allOutputs
 
-        var id: String { rawValue }
+        var id: String {
+            switch self {
+            case let .settings(tab): return "settings-\(tab.rawValue)"
+            case .history: return "history"
+            case .logs: return "logs"
+            case .allOutputs: return "allOutputs"
+            }
+        }
     }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                TaskSidebarView(openSettings: { presentedSheet = .settings })
+                TaskSidebarView(openSettings: { presentedSheet = .settings($0) })
                 Divider()
                 mainWorkspace
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -70,8 +77,7 @@ struct MainWindowContent: View {
                     }
             }
             PersistentActionBar(
-                openLogs: { presentedSheet = .logs },
-                openSettings: { presentedSheet = .settings }
+                openLogs: { presentedSheet = .logs }
             )
         }
         .id(model.appLanguage)
@@ -92,7 +98,7 @@ struct MainWindowContent: View {
             model.promptToDownloadMissingRuntimeIfNeeded()
             #if DEBUG
             if ProcessInfo.processInfo.environment["TRANS2_DEBUG_OPEN_SETTINGS"] == "1" {
-                presentedSheet = .settings
+                presentedSheet = .settings(.general)
             }
             #endif
         }
@@ -128,10 +134,7 @@ struct MainWindowContent: View {
                 openAllOutputs: { presentedSheet = .allOutputs }
             )
         case let .setup(readiness):
-            SetupWorkspaceView(
-                readiness: readiness,
-                openSettings: { presentedSheet = .settings }
-            )
+            SetupWorkspaceView(readiness: readiness)
         }
     }
 
@@ -155,7 +158,7 @@ struct MainWindowContent: View {
             }
 
             Button {
-                presentedSheet = .settings
+                presentedSheet = .settings(.general)
             } label: {
                 Label(L.tr("button.settings"), systemImage: "gearshape")
             }
@@ -166,8 +169,8 @@ struct MainWindowContent: View {
 
     @ViewBuilder private func presentedSheetView(_ sheet: PresentedSheet) -> some View {
         switch sheet {
-        case .settings:
-            SettingsSheet()
+        case let .settings(tab):
+            SettingsSheet(initialTab: tab)
         case .history:
             HistorySheet(isClearConfirmationPresented: $isClearHistoryConfirmationPresented)
         case .logs:
@@ -183,7 +186,6 @@ struct MainWindowContent: View {
 struct PersistentActionBar: View {
     @EnvironmentObject private var model: AppModel
     let openLogs: () -> Void
-    let openSettings: () -> Void
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -313,6 +315,13 @@ struct PersistentActionBar: View {
             return L.tr("bar.stage.preparing", nextIndex, total, fileName)
         case let .transcribingBatch(totalFiles):
             return L.tr("bar.stage.transcribing", totalFiles)
+        case let .pipelined(currentIndex, totalFiles, translatedFiles):
+            return L.tr(
+                "bar.stage.pipelined",
+                min(currentIndex + 1, max(totalFiles, 1)),
+                totalFiles,
+                translatedFiles
+            )
         case let .translatingFiles(currentIndex, totalFiles):
             return L.tr("bar.stage.translating", min(currentIndex + 1, max(totalFiles, 1)), totalFiles)
         case .stopping:
@@ -328,6 +337,8 @@ struct PersistentActionBar: View {
             return L.tr("bar.progress.estimated_percent", Int(model.overallProgress * 100))
         case .transcribingBatch:
             return L.tr("bar.progress.estimated_percent", Int(model.currentTranscriptionProgress * 100))
+        case .pipelined:
+            return L.tr("bar.progress.pipelined", Int(model.overallProgress * 100))
         case .translatingFiles:
             return L.tr("bar.progress.translating_percent", Int(model.overallProgress * 100))
         case .stopping:
@@ -513,255 +524,6 @@ struct PersistentActionBar: View {
             return disabledReasonText(reason)
         }
         return L.tr("bar.ready_files", model.inputFiles.count)
-    }
-}
-
-// MARK: - Settings sheet
-
-struct SettingsSheet: View {
-    @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                Text(L.tr("button.settings"))
-                    .font(.system(size: UITypographyScale.scaled(22), weight: .semibold))
-
-            GroupBox(L.tr("settings.section.general")) {
-                LabeledRow(title: L.tr("label.interface_language")) {
-                    Picker(L.tr("label.interface_language"), selection: $model.appLanguage) {
-                        ForEach(AppLanguage.allCases) { language in
-                            Text(language.displayName).tag(language)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .frame(width: 200, alignment: .leading)
-                }
-                .padding(.vertical, 4)
-            }
-
-            GroupBox(L.tr("settings.section.paths")) {
-                VStack(spacing: 12) {
-                    pathRow(title: L.tr("field.whisper_cli"), text: $model.whisperCLIPath) {
-                        model.chooseWhisperCLI()
-                    }
-                    if model.vadSettings.isEnabled {
-                        Text(vadCLICapabilityMessage)
-                            .font(.caption)
-                            .foregroundStyle(model.vadCLICapability == .unsupported ? Color(nsColor: .systemOrange) : .secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    pathRow(title: L.tr("field.model_file"), text: $model.modelPath) {
-                        model.chooseModel()
-                    }
-                    vadModelPathRow
-                    HStack(spacing: 8) {
-                        StatusDot(color: model.hasResolvableVADModel ? Color(nsColor: .systemGreen) : Color(nsColor: .systemOrange))
-                        Text(model.hasResolvableVADModel
-                            ? L.tr("vad.model_available", URL(fileURLWithPath: model.resolvedVADModelPath).lastPathComponent)
-                            : L.tr("vad.model_missing_short"))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Spacer()
-                        if model.isDownloadingVADModel {
-                            Button(L.tr("button.cancel_download"), role: .destructive) {
-                                model.cancelVADModelDownload()
-                            }
-                        } else if !model.hasResolvableVADModel {
-                            Button(L.tr("vad.download")) { model.downloadVADModel() }
-                                .disabled(!model.canDownloadRuntimeAssets)
-                        }
-                    }
-                    if model.isDownloadingVADModel {
-                        HStack(spacing: 12) {
-                            if let progress = model.downloadProgress {
-                                ProgressView(value: progress).frame(width: 200)
-                            } else {
-                                ProgressView().controlSize(.small)
-                            }
-                            Text(model.statusText)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                        }
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-
-            GroupBox(L.tr("hf.section")) {
-                VStack(alignment: .leading, spacing: 10) {
-                    LabeledRow(title: L.tr("hf.source.label")) {
-                        Picker(L.tr("hf.source.label"), selection: $model.huggingFaceDownloadSource) {
-                            ForEach(HuggingFaceDownloadSource.allCases) { source in
-                                Text(source.displayName).tag(source)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-                        .frame(width: 230, alignment: .leading)
-                        .disabled(model.isBusy)
-                    }
-                    if model.huggingFaceDownloadSource == .custom {
-                        LabeledRow(title: L.tr("hf.endpoint.custom")) {
-                            TextField("https://example.com", text: $model.customHuggingFaceEndpoint)
-                                .textFieldStyle(.roundedBorder)
-                                .disabled(model.isBusy)
-                        }
-                    }
-                    LabeledRow(title: L.tr("hf.endpoint.current")) {
-                        Text(model.huggingFaceEndpointDisplayText)
-                            .font(.callout.monospaced())
-                            .foregroundStyle(model.isHuggingFaceEndpointInvalid ? Color(nsColor: .systemOrange) : .secondary)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    if model.isHuggingFaceEndpointInvalid {
-                        Text(L.tr("hf.endpoint.invalid_detail"))
-                            .font(.caption)
-                            .foregroundStyle(Color(nsColor: .systemOrange))
-                    }
-                    if model.hasHuggingFaceEnvironmentOverride {
-                        Text(L.tr("hf.endpoint.environment_override", HuggingFaceEndpoint.environmentVariableName))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-
-            GroupBox(L.tr("section.runtime")) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Picker(L.tr("label.acceleration_mode"), selection: $model.accelerationMode) {
-                        ForEach(AccelerationMode.allCases, id: \.self) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(maxWidth: 320, alignment: .leading)
-                    .disabled(model.isBusy)
-
-                    Text(model.accelerationDetail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Text(model.accelerationSummary)
-                        .font(.callout)
-                        .foregroundStyle(
-                            model.configurationLooksReady
-                                ? AnyShapeStyle(.secondary)
-                                : AnyShapeStyle(Color(nsColor: .systemOrange))
-                        )
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    downloadStatusRow
-                }
-                .padding(.vertical, 4)
-            }
-
-            Divider()
-
-            HStack(spacing: 12) {
-                Text(L.tr("settings.section.help"))
-                    .font(.headline)
-                Button(L.tr("button.view_readme")) {
-                    model.openProjectREADME()
-                }
-                Spacer()
-                Button(L.tr("button.done")) {
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(24)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(width: 680, height: 720)
-    }
-
-    private var vadCLICapabilityMessage: String {
-        switch model.vadCLICapability {
-        case .unchecked, .checking: L.tr("vad.cli_checking")
-        case .supported: L.tr("vad.cli_supported")
-        case .unsupported: L.tr("vad.cli_unsupported")
-        }
-    }
-
-    private var vadModelPathRow: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            LabeledRow(title: L.tr("vad.model_path")) {
-                HStack(spacing: 8) {
-                    TextField(L.tr("vad.model_path_unavailable"), text: .constant(model.vadModelDisplayPath))
-                        .textFieldStyle(.roundedBorder)
-                        .disabled(true)
-                        .textSelection(.enabled)
-                    Button(L.tr("button.choose")) { model.chooseVADModel() }
-                        .disabled(model.isBusy)
-                }
-            }
-            HStack(spacing: 8) {
-                Text(model.isVADModelUsingAutomaticPath ? L.tr("vad.path_automatic") : L.tr("vad.path_manual"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if !model.vadSettings.modelPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Button(L.tr("vad.restore_automatic")) { model.restoreAutomaticVADModel() }
-                        .buttonStyle(.link)
-                        .font(.caption)
-                        .disabled(model.isBusy)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    @ViewBuilder private var downloadStatusRow: some View {
-        if model.isDownloadingRuntime {
-            HStack(spacing: 12) {
-                if let progress = model.downloadProgress {
-                    ProgressView(value: progress)
-                        .frame(width: 200)
-                } else {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-                Text(model.statusText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                Button(L.tr("button.cancel_download"), role: .destructive) {
-                    model.cancelRuntimeDownload()
-                }
-            }
-        } else if !model.downloadableRuntimeComponents.isEmpty {
-            HStack(spacing: 12) {
-                Button(L.tr("button.download_runtime")) {
-                    model.startRuntimeDownload()
-                }
-                .disabled(!model.canDownloadRuntimeAssets)
-                Text(L.tr("privacy.download"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private func pathRow(title: String, text: Binding<String>, choose: @escaping () -> Void) -> some View {
-        LabeledRow(title: title) {
-            HStack(spacing: 8) {
-                TextField("", text: text)
-                    .textFieldStyle(.roundedBorder)
-                Button(L.tr("button.choose"), action: choose)
-                    .disabled(model.isBusy)
-            }
-        }
     }
 }
 
