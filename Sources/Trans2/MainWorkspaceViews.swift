@@ -174,7 +174,6 @@ struct SetupWorkspaceView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.windowSizeMode) private var windowSizeMode
     let readiness: SetupReadiness
-    let openSettings: () -> Void
 
     private var missingBlockers: Set<RuntimeComponent> {
         if case let .missingRuntime(blockers) = readiness {
@@ -664,6 +663,8 @@ struct RunWorkspaceView: View {
             return L.tr("run.title.preparing")
         case .transcribingBatch:
             return L.tr("run.title.batch")
+        case .pipelined:
+            return L.tr("run.title.pipelined")
         case .translatingFiles:
             return L.tr("run.title.translating")
         case .stopping:
@@ -681,6 +682,13 @@ struct RunWorkspaceView: View {
             return L.tr("bar.stage.preparing", min(currentIndex + 1, max(total, 1)), total, fileName)
         case .transcribingBatch:
             return L.tr("run.subtitle.batch")
+        case let .pipelined(currentIndex, totalFiles, translatedFiles):
+            return L.tr(
+                "run.subtitle.pipelined",
+                min(currentIndex + 1, max(totalFiles, 1)),
+                totalFiles,
+                translatedFiles
+            )
         case let .translatingFiles(currentIndex, totalFiles):
             return L.tr("run.subtitle.translating", min(currentIndex + 1, max(totalFiles, 1)), totalFiles, model.currentFileName)
         case .stopping:

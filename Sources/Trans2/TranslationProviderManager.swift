@@ -4,9 +4,11 @@ import TransCore
 /// Provider management for the translation stage. Mirrors AITrans' provider
 /// sheet: presets, per-provider keys in a local 0600 file, connectivity test,
 /// and a one-click import of an existing AITrans install.
-struct TranslationProviderSheet: View {
+///
+/// Embedded as the "提供商" tab of the settings window; it owns no window
+/// chrome of its own.
+struct TranslationProviderManager: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
 
     @State private var selection: String?
     @State private var draft = Provider(id: "", name: "", baseURL: "", model: "", apiKey: "", requiresKey: true)
@@ -21,21 +23,20 @@ struct TranslationProviderSheet: View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 Text(L.tr("translation.providers.title"))
-                    .font(.title3.bold())
+                    .font(.headline)
                 Spacer()
                 Button(L.tr("translation.providers.import_aitrans")) { importFromAITrans() }
-                Button(L.tr("button.done")) { dismiss() }
-                    .keyboardShortcut(.defaultAction)
+                    .controlSize(.small)
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
 
             if let importMessage {
                 Text(importMessage)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 18)
+                    .padding(.horizontal, 16)
                     .padding(.bottom, 8)
             }
 
@@ -43,12 +44,11 @@ struct TranslationProviderSheet: View {
 
             HSplitView {
                 sidebar
-                    .frame(minWidth: 220, idealWidth: 250, maxWidth: 300)
+                    .frame(minWidth: 200, idealWidth: 230, maxWidth: 280)
                 editor
-                    .frame(minWidth: 440)
+                    .frame(minWidth: 420)
             }
         }
-        .frame(width: 880, height: 560)
         .onAppear(perform: syncSelection)
         .confirmationDialog(
             L.tr("translation.providers.delete_title"),

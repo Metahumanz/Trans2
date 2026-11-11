@@ -168,3 +168,87 @@ extension AppModelPipelineTests {
         #expect(text.contains("Existing subtitle"))
     }
 }
+
+extension AppModelPipelineTests {
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["TRANS2_E2E"] == "1"))
+    func duringTranscriptionPipelineTranslatesEachFileAsItFinishes() async throws {
+        let whisperCLI = ProcessInfo.processInfo.environment["TRANS2_E2E_WHISPER"]
+            ?? "\(NSHomeDirectory())/Library/Application Support/WhisperMac/custom-runtime/bin/whisper-cli"
+        let modelPath = ProcessInfo.processInfo.environment["TRANS2_E2E_MODEL"]
+            ?? "\(NSHomeDirectory())/Library/Application Support/WhisperMac/runtime/Models/ggml-large-v3-turbo.bin"
+        let apiBase = ProcessInfo.processInfo.environment["TRANS2_E2E_API"] ?? "http://127.0.0.1:8765/v1"
+
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "trans2-pipeline-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let support = root.appending(path: "support", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let suiteName = "trans2-pipeline-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        var translation = TranslationSettings()
+        translation.isEnabled = true
+        translation.backend = .api
+        translation.targetLanguage = .zh
+        translation.polish = false
+        translation.timing = .duringTranscription
+        defaults.set(whisperCLI, forKey: "whisperCLIPath")
+        defaults.set(modelPath, forKey: "modelPath")
+        defaults.set(root.path, forKey: "outputDirectoryPath")
+        defaults.set(["srt"], forKey: "outputFormats")
+        defaults.set(try JSONEncoder().encode(translation), forKey: "translationSettings")
+
+        let store = ProviderStore(secrets: MemorySecretStore())
+        _ = try store.upsert(
+            Provider(id: "mock", name: "Mock", baseURL: apiBase, model: "mock", apiKey: "k"),
+            activate: true
+        )
+        try store.save(to: support.appending(path: "providers.json"))
+
+        let model = AppModel(
+            completionNotifier: CompletionNotifier(isEligibleForNotifications: { false }),
+            defaults: defaults,
+            providerStore: store,
+            supportDirectory: support
+        )
+
+        var audioFiles: [URL] = []
+        for index in 0..<2 {
+            let audio = root.appending(path: "speech-\(index).wav")
+            let say = Process()
+            say.executableURL = URL(fileURLWithPath: "/usr/bin/say")
+            say.arguments = [
+                "-v", "Samantha",
+                "-o", audio.path,
+                "--data-format=LEI16@16000",
+                "Hello world number \(index + 1). This is a pipeline test.",
+            ]
+            try say.run()
+            say.waitUntilExit()
+            #expect(say.terminationStatus == 0)
+            audioFiles.append(audio)
+        }
+
+        model.addMediaURLs(audioFiles)
+        await model.waitForMediaScan()
+        #expect(model.inputFiles.count == 2)
+        #expect(model.canStart)
+
+        model.startTranscription()
+        for _ in 0..<240 {
+            if !model.isRunning, model.lastOutcome != nil { break }
+            try await Task.sleep(for: .seconds(1))
+        }
+
+        guard case let .succeeded(_, outputs)? = model.lastOutcome else {
+            Issue.record("pipeline run failed: \(String(describing: model.lastOutcome)); \(model.logsText)")
+            return
+        }
+        let translated = outputs.filter { $0.lastPathComponent.hasSuffix(".zh.srt") }
+        #expect(translated.count == 2)
+        #expect(model.pipelinedTranslatedFiles == 2)
+        #expect(model.lastTranslationFailureCount == 0)
+    }
+}

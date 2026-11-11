@@ -7,11 +7,8 @@ import TransCore
 /// a modal sheet.
 struct TaskSidebarView: View {
     @EnvironmentObject private var model: AppModel
-    let openSettings: () -> Void
+    let openSettings: (SettingsTab) -> Void
 
-    @State private var showsProviderSheet = false
-    @State private var showsTranscription = false
-    @State private var showsOutput = false
     @State private var showsTranslationAdvanced = false
 
     private var isLocked: Bool { model.isRunning || model.isScanningMedia }
@@ -26,17 +23,6 @@ struct TaskSidebarView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text(L.tr("queue.title")))
-        .sheet(isPresented: $showsProviderSheet) {
-            TranslationProviderSheet()
-                .environmentObject(model)
-        }
-        #if DEBUG
-        .onAppear {
-            if ProcessInfo.processInfo.environment["TRANS2_DEBUG_OPEN_PROVIDERS"] == "1" {
-                showsProviderSheet = true
-            }
-        }
-        #endif
     }
 
     // MARK: - Queue
@@ -232,6 +218,22 @@ struct TaskSidebarView: View {
                     }
                 }
 
+                SidebarField( L.tr("translation.timing")) {
+                    Picker("", selection: $model.translationSettings.timing) {
+                        ForEach(TranslationTiming.allCases) { timing in
+                            Text(timing.title).tag(timing)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                Text(model.translationSettings.timing.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 DisclosureGroup(L.tr("sidebar.more_translation"), isExpanded: $showsTranslationAdvanced) {
                     VStack(alignment: .leading, spacing: 10) {
                         SidebarField( L.tr("translation.output_mode")) {
@@ -291,7 +293,7 @@ struct TaskSidebarView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Button {
-                    showsProviderSheet = true
+                    openSettings(.providers)
                 } label: {
                     Image(systemName: "slider.horizontal.3")
                 }
@@ -328,87 +330,11 @@ struct TaskSidebarView: View {
     }
 
     private var transcriptionSection: some View {
-        DisclosureGroup(isExpanded: $showsTranscription) {
-            VStack(alignment: .leading, spacing: 10) {
-                SidebarField( L.tr("label.audio_language")) {
-                Picker("", selection: $model.sourceLanguage) {
-                    Text(WhisperLanguage.auto.displayName).tag(WhisperLanguage.autoCode)
-                    ForEach(WhisperLanguage.common) { language in
-                        Text(language.displayName).tag(language.code)
-                    }
-                }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            Toggle(L.tr("vad.enable"), isOn: $model.vadSettings.isEnabled)
-                .toggleStyle(.checkbox)
-                .font(.caption)
-
-            if model.vadSettings.isEnabled {
-                HStack(spacing: 6) {
-                    StatusDot(color: model.hasResolvableVADModel
-                        ? Color(nsColor: .systemGreen)
-                        : Color(nsColor: .systemOrange))
-                    Text(model.hasResolvableVADModel
-                        ? L.tr("sidebar.vad.ready")
-                        : L.tr("vad.model_missing_short"))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    if !model.hasResolvableVADModel {
-                        Button(L.tr("vad.download")) { model.downloadVADModel() }
-                            .buttonStyle(.link)
-                            .font(.caption2)
-                            .disabled(!model.canDownloadRuntimeAssets)
-                    }
-                }
-            }
-
-            DisclosureGroup(L.tr("sidebar.more_transcribe")) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Toggle(L.tr("toggle.translate_to_english"), isOn: $model.translatesToEnglish)
-                        .toggleStyle(.checkbox)
-                        .font(.caption)
-                    Toggle(L.tr("text_context.enable"), isOn: $model.usesTextContext)
-                        .toggleStyle(.checkbox)
-                        .font(.caption)
-                    Text(L.tr("text_context.hint"))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.top, 4)
-            }
-            .font(.caption)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(model.accelerationMode.title)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(model.accelerationSummary)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Button {
-                    openSettings()
-                } label: {
-                    Label(L.tr("sidebar.paths_and_models"), systemImage: "gearshape")
-                        .font(.caption)
-                }
-                .buttonStyle(.link)
-            }
-            .padding(.top, 4)
-        } label: {
-            sectionLabel(
-                L.tr("sidebar.section.transcribe"),
-                summary: transcriptionSummary
-            )
-        }
+        settingsSummaryRow(
+            title: L.tr("sidebar.section.transcribe"),
+            summary: transcriptionSummary,
+            tab: .transcription
+        )
     }
 
     private var transcriptionSummary: String {
@@ -418,82 +344,20 @@ struct TaskSidebarView: View {
     }
 
     private var outputSection: some View {
-        DisclosureGroup(isExpanded: $showsOutput) {
-            VStack(alignment: .leading, spacing: 10) {
-                SidebarField( L.tr("label.output_directory")) {
-                Menu {
-                    Button(L.tr("options.output.follow")) {
-                        model.outputDirectoryPath = ""
-                    }
-                    if !model.outputDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Button(model.outputDirectoryPath) {}
-                            .disabled(true)
-                    }
-                    Divider()
-                    Button(L.tr("options.output.choose")) {
-                        model.chooseOutputDirectory()
-                    }
-                } label: {
-                    HStack {
-                        Text(outputLocationDisplayText(model.outputDirectoryPath))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Spacer(minLength: 4)
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .menuStyle(.borderlessButton)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            SidebarField( L.tr("label.export_formats")) {
-                LazyVGrid(
-                    columns: [
-                        GridItem(.flexible(), alignment: .leading),
-                        GridItem(.flexible(), alignment: .leading),
-                    ],
-                    alignment: .leading,
-                    spacing: 6
-                ) {
-                    formatToggle(.txt)
-                    formatToggle(.srt)
-                    formatToggle(.vtt)
-                    formatToggle(.json)
-                }
-            }
-
-                Text(L.tr("sidebar.output.auto_srt"))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.top, 4)
-        } label: {
-            sectionLabel(
-                L.tr("sidebar.section.output"),
-                summary: formatsSummaryText(model.outputFormats)
-            )
-        }
-    }
-
-    private func formatToggle(_ format: OutputFormat) -> some View {
-        Toggle(L.tr("toggle.export_\(format.rawValue)"), isOn: formatBinding(for: format))
-            .toggleStyle(.checkbox)
-            .font(.caption)
-            .disabled(model.isBusy || model.outputFormats == [format])
-    }
-
-    private func formatBinding(for format: OutputFormat) -> Binding<Bool> {
-        Binding(
-            get: { model.outputFormats.contains(format) },
-            set: { enabled in model.setFormat(format, enabled: enabled) }
+        settingsSummaryRow(
+            title: L.tr("sidebar.section.output"),
+            summary: outputSummary,
+            tab: .output
         )
     }
 
-    private func sectionLabel(_ title: String, summary: String) -> some View {
+    private var outputSummary: String {
+        let formats = formatsSummaryText(model.outputFormats)
+        let location = outputLocationDisplayText(model.outputDirectoryPath)
+        return "\(formats) · \(location)"
+    }
+
+    private func settingsSummaryRow(title: String, summary: String, tab: SettingsTab) -> some View {
         HStack(spacing: 8) {
             SidebarHeader(title: title)
             Spacer(minLength: 6)
@@ -502,6 +366,15 @@ struct TaskSidebarView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
+            Button {
+                openSettings(tab)
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+            }
+            .buttonStyle(.borderless)
+            .help(L.tr("sidebar.open_settings"))
+            .accessibilityLabel(Text(L.tr("sidebar.open_settings")))
         }
     }
 

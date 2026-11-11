@@ -70,6 +70,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var activeProviderID: String?
     @Published private(set) var lastTranslationCount = 0
     @Published private(set) var lastTranslationFailureCount = 0
+    @Published private(set) var pipelinedTranslatedFiles = 0
     @Published private(set) var lastRunTranslationWasEnabled = false
     @Published private(set) var lastRunTranslationTarget: Language = .zh
     @Published var logs: [String]
@@ -232,6 +233,13 @@ final class AppModel: ObservableObject {
         if storedTranslationSettings == nil, !providers.isEmpty {
             translationSettings.isEnabled = true
         }
+
+        #if DEBUG
+        if let raw = ProcessInfo.processInfo.environment["TRANS2_DEBUG_TRANSLATION_TIMING"],
+           let timing = TranslationTiming(rawValue: raw) {
+            translationSettings.timing = timing
+        }
+        #endif
     }
 
     var logsText: String {
@@ -915,6 +923,7 @@ final class AppModel: ObservableObject {
         selectedResultFileID = nil
         lastTranslationCount = 0
         lastTranslationFailureCount = 0
+        pipelinedTranslatedFiles = 0
         lastRunTranslationWasEnabled = translationSettings.isEnabled
         lastRunTranslationTarget = translationSettings.targetLanguage
         activeSnapshot = snapshot
@@ -1085,8 +1094,26 @@ final class AppModel: ObservableObject {
                 }
             }
             var reports: [TranscriptionReport] = []
-            if hasMedia, let modelPlan {
-                reports = try await service.transcribeBatch(
+            var translatedFiles: [URL] = []
+            if hasMedia,
+               let modelPlan,
+               let translationContext,
+               snapshot.translation.timing == .duringTranscription {
+                let result = try await transcribeAndTranslatePipelined(
+                    mediaInputs: mediaInputs,
+                    batchInputs: batchInputs,
+                    subtitleInputs: subtitleInputs,
+                    service: service,
+                    modelPlan: modelPlan,
+                    context: translationContext,
+                    snapshot: snapshot,
+                    awaitsCoreMLConfirmation: awaitsCoreMLConfirmation
+                )
+                reports = result.reports
+                translatedFiles = result.translatedFiles
+            } else {
+                if hasMedia, let modelPlan {
+                    reports = try await service.transcribeBatch(
                 inputs: batchInputs,
                 whisperCLIPath: snapshot.whisperCLIPath,
                 modelPath: modelPlan.executionModelPath,
@@ -1157,6 +1184,27 @@ final class AppModel: ObservableObject {
                     }
                 }
                 )
+                }
+
+                let transcriptSRTs = reports.flatMap(\.outputFiles).filter {
+                    $0.pathExtension.lowercased() == "srt"
+                }
+                let translationSources = transcriptSRTs + subtitleInputs
+                if let translationContext, !translationSources.isEmpty {
+                    let trimmedOutput = snapshot.outputDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let outputDirectory = trimmedOutput.isEmpty
+                        ? nil
+                        : URL(fileURLWithPath: PathResolver.expandingTilde(trimmedOutput))
+                    let result = try await translateTranscripts(
+                        translationSources,
+                        outputDirectory: outputDirectory,
+                        context: translationContext,
+                        snapshot: snapshot
+                    )
+                    translatedFiles = result.files
+                } else if !subtitleInputs.isEmpty, !snapshot.translation.isEnabled {
+                    appendLog(L.tr("translation.log.subtitles_skipped", subtitleInputs.count))
+                }
             }
 
             let noSpeechInputFiles = hasMedia && snapshot.vadSettings.isEnabled
@@ -1180,24 +1228,9 @@ final class AppModel: ObservableObject {
                 }
             }
             let transcriptFiles = reports.flatMap(\.outputFiles)
-            var translatedFiles: [URL] = []
-            var translationSources = transcriptFiles.filter { $0.pathExtension.lowercased() == "srt" }
-            translationSources += subtitleInputs
-            if let translationContext, !translationSources.isEmpty {
-                let trimmedOutput = snapshot.outputDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
-                let outputDirectory = trimmedOutput.isEmpty
-                    ? nil
-                    : URL(fileURLWithPath: PathResolver.expandingTilde(trimmedOutput))
-                let result = try await translateTranscripts(
-                    translationSources,
-                    outputDirectory: outputDirectory,
-                    context: translationContext,
-                    snapshot: snapshot
-                )
-                translatedFiles = result.files
-            } else if !subtitleInputs.isEmpty, !snapshot.translation.isEnabled {
-                appendLog(L.tr("translation.log.subtitles_skipped", subtitleInputs.count))
-            }
+            let translationSources = transcriptFiles.filter {
+                $0.pathExtension.lowercased() == "srt"
+            } + subtitleInputs
             installPreviewFiles(
                 from: reports,
                 translatedFiles: translatedFiles,
@@ -1310,6 +1343,268 @@ final class AppModel: ObservableObject {
 
     /// Translates every whisper-produced SRT in order. A failed file is logged
     /// and skipped: the transcript itself is still a successful result.
+    /// Transcribes one media file at a time and starts translating each SRT as
+    /// soon as it exists, while the next file is still on the GPU. This is the
+    /// "translate while transcribing" mode; translation files run at most
+    /// `maxInFlight` at a time so API providers are not flooded.
+    private func transcribeAndTranslatePipelined(
+        mediaInputs: [URL],
+        batchInputs: [BatchTranscriptionInput],
+        subtitleInputs: [URL],
+        service: TranscriptionService,
+        modelPlan: RuntimeModelPlan,
+        context: TranslationContext,
+        snapshot: AppConfigurationSnapshot,
+        awaitsCoreMLConfirmation: Bool
+    ) async throws -> (reports: [TranscriptionReport], translatedFiles: [URL]) {
+        let mediaCount = mediaInputs.count
+        let trimmedOutput = snapshot.outputDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let outputDirectory = trimmedOutput.isEmpty
+            ? nil
+            : URL(fileURLWithPath: PathResolver.expandingTilde(trimmedOutput))
+        let maxInFlight = snapshot.translation.backend == .api ? 2 : 1
+
+        var reports: [TranscriptionReport] = []
+        var translatedFiles: [URL] = []
+        var failures = 0
+        var tasks: [Task<(URL?, Int), Never>] = []
+        defer { tasks.forEach { $0.cancel() } }
+
+        func record(_ result: (URL?, Int)) {
+            if let url = result.0 {
+                translatedFiles.append(url)
+            }
+            failures += result.1
+        }
+
+        func enqueue(_ srt: URL) {
+            let task = Task { [self] in
+                await translateOneFile(
+                    srt,
+                    context: context,
+                    snapshot: snapshot,
+                    outputDirectory: outputDirectory
+                )
+            }
+            tasks.append(task)
+        }
+
+        func drainIfNeeded() async throws {
+            while tasks.count >= maxInFlight {
+                let task = tasks.removeFirst()
+                record(await task.value)
+                try Task.checkCancellation()
+            }
+        }
+
+        for srt in subtitleInputs {
+            try Task.checkCancellation()
+            enqueue(srt)
+            try await drainIfNeeded()
+        }
+
+        for (index, input) in mediaInputs.enumerated() {
+            try Task.checkCancellation()
+            activePhase = .pipelined(
+                currentIndex: index,
+                totalFiles: mediaCount,
+                translatedFiles: pipelinedTranslatedFiles
+            )
+            statusText = L.tr(
+                "pipeline.status.file",
+                index + 1,
+                mediaCount,
+                pipelinedTranslatedFiles
+            )
+            currentFileName = input.lastPathComponent
+            currentFileProgress = 0
+
+            let fileReports = try await service.transcribeBatch(
+                inputs: [batchInputs[index]],
+                whisperCLIPath: snapshot.whisperCLIPath,
+                modelPath: modelPlan.executionModelPath,
+                formats: snapshot.outputFormats,
+                sourceLanguage: snapshot.sourceLanguage,
+                translatesToEnglish: snapshot.translatesToEnglish,
+                usesTextContext: snapshot.usesTextContext,
+                vadSettings: snapshot.vadSettings,
+                onInputStageChange: { [weak self] _, stage in
+                    await MainActor.run {
+                        guard let self else { return }
+                        self.activePhase = .pipelined(
+                            currentIndex: index,
+                            totalFiles: mediaCount,
+                            translatedFiles: self.pipelinedTranslatedFiles
+                        )
+                        self.statusText = L.tr(
+                            "pipeline.status.file",
+                            index + 1,
+                            mediaCount,
+                            self.pipelinedTranslatedFiles
+                        )
+                        self.currentFileName = input.lastPathComponent
+                        switch stage {
+                        case .preparing:
+                            self.currentStageDescription = stage.description
+                            self.currentFileProgress = 0.03
+                        case .extractingAudio:
+                            self.currentStageDescription = stage.description
+                            self.currentFileProgress = max(self.currentFileProgress, 0.12)
+                        default:
+                            break
+                        }
+                        self.overallProgress = self.pipelineProgress(
+                            fileIndex: index,
+                            mediaCount: mediaCount,
+                            fileFraction: self.currentFileProgress,
+                            translatedFiles: self.pipelinedTranslatedFiles
+                        )
+                    }
+                },
+                onStageChange: { [weak self] stage in
+                    await MainActor.run {
+                        guard let self else { return }
+                        switch stage {
+                        case .transcribing:
+                            self.activePhase = .pipelined(
+                                currentIndex: index,
+                                totalFiles: mediaCount,
+                                translatedFiles: self.pipelinedTranslatedFiles
+                            )
+                            self.statusText = L.tr(
+                                "pipeline.status.file",
+                                index + 1,
+                                mediaCount,
+                                self.pipelinedTranslatedFiles
+                            )
+                            self.currentStageDescription = stage.description
+                            self.currentFileProgress = max(self.currentFileProgress, 0.18)
+                        case .finished:
+                            self.currentStageDescription = stage.description
+                            self.currentTranscriptionProgress = 1
+                            self.currentFileProgress = 1
+                            self.overallProgress = self.pipelineProgress(
+                                fileIndex: index + 1,
+                                mediaCount: mediaCount,
+                                fileFraction: 0,
+                                translatedFiles: self.pipelinedTranslatedFiles
+                            )
+                        default:
+                            break
+                        }
+                    }
+                },
+                onLog: { [weak self] line in
+                    await MainActor.run {
+                        self?.observeRuntimeAccelerationLog(line, expectedCoreML: awaitsCoreMLConfirmation)
+                        self?.appendLog(line)
+                    }
+                },
+                onTranscriptionProgress: { [weak self] progress in
+                    await MainActor.run {
+                        guard let self else { return }
+                        self.currentTranscriptionProgress = progress
+                        self.currentStageDescription = L.tr("stage.transcribing_progress", Int(progress * 100))
+                        self.currentFileProgress = max(0.18, 0.18 + 0.82 * progress)
+                        self.overallProgress = self.pipelineProgress(
+                            fileIndex: index,
+                            mediaCount: mediaCount,
+                            fileFraction: self.currentFileProgress,
+                            translatedFiles: self.pipelinedTranslatedFiles
+                        )
+                    }
+                },
+                onSegment: { [weak self] segment in
+                    await MainActor.run {
+                        self?.appendLiveSegment(segment)
+                    }
+                }
+            )
+
+            if let report = fileReports.first {
+                reports.append(report)
+                if let srt = report.outputFiles.first(where: { $0.pathExtension.lowercased() == "srt" }) {
+                    enqueue(srt)
+                    try await drainIfNeeded()
+                }
+            }
+        }
+
+        let translationTotal = mediaCount + subtitleInputs.count
+        activePhase = .translatingFiles(
+            currentIndex: translatedFiles.count,
+            totalFiles: translationTotal
+        )
+        statusText = L.tr("pipeline.status.wait", tasks.count)
+        currentFileName = ""
+        while !tasks.isEmpty {
+            let task = tasks.removeFirst()
+            record(await task.value)
+            try Task.checkCancellation()
+            activePhase = .translatingFiles(
+                currentIndex: translatedFiles.count,
+                totalFiles: translationTotal
+            )
+        }
+
+        if failures > 0 {
+            appendLog(L.tr("pipeline.log.failed_files", failures))
+        }
+        return (reports, translatedFiles)
+    }
+
+    private func pipelineProgress(
+        fileIndex: Int,
+        mediaCount: Int,
+        fileFraction: Double,
+        translatedFiles: Int
+    ) -> Double {
+        guard mediaCount > 0 else { return 0 }
+        let transcription = min((Double(fileIndex) + fileFraction) / Double(mediaCount), 1)
+        let translation = min(Double(translatedFiles) / Double(mediaCount), 1)
+        return min(0.98, transcription * 0.9 + translation * 0.1)
+    }
+
+    private func translateOneFile(
+        _ srt: URL,
+        context: TranslationContext,
+        snapshot: AppConfigurationSnapshot,
+        outputDirectory: URL?
+    ) async -> (URL?, Int) {
+        let service = SRTTranslationService(client: context.client)
+        appendLog(L.tr("translation.log.file", srt.lastPathComponent))
+        do {
+            let outcome = try await service.translateFile(
+                source: srt,
+                language: snapshot.translation.targetLanguage,
+                outputMode: snapshot.translation.outputMode,
+                polish: snapshot.translation.polish,
+                workers: snapshot.translation.workers,
+                polishWorkers: snapshot.translation.backend == .api
+                    ? min(snapshot.translation.workers, Spec.defaultPolishWorkers)
+                    : 1,
+                outputDirectory: outputDirectory,
+                onProgress: nil
+            )
+            lastTranslationCount += outcome.translatedCount
+            lastTranslationFailureCount += outcome.errorCount
+            pipelinedTranslatedFiles += 1
+            appendLog(L.tr(
+                "translation.log.done",
+                outcome.outputURL.lastPathComponent,
+                outcome.translatedCount,
+                outcome.cueCount
+            ))
+            return (outcome.outputURL, 0)
+        } catch is CancellationError {
+            return (nil, 1)
+        } catch {
+            lastTranslationFailureCount += 1
+            appendLog(L.tr("translation.log.failed", srt.lastPathComponent, error.localizedDescription))
+            return (nil, 1)
+        }
+    }
+
     private func translateTranscripts(
         _ srtFiles: [URL],
         outputDirectory: URL?,

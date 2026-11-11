@@ -1,6 +1,30 @@
 import Foundation
 import TransCore
 
+/// When the translation stage runs relative to transcription.
+enum TranslationTiming: String, Codable, CaseIterable, Identifiable, Sendable {
+    /// Transcribe the whole media batch first, then translate all SRTs.
+    case afterTranscription
+    /// Translate each finished file while the next file is still transcribing.
+    case duringTranscription
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .afterTranscription: return L.tr("translation.timing.after")
+        case .duringTranscription: return L.tr("translation.timing.during")
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .afterTranscription: return L.tr("translation.timing.after.detail")
+        case .duringTranscription: return L.tr("translation.timing.during.detail")
+        }
+    }
+}
+
 /// How a translated subtitle is written next to the transcript.
 enum TranslationOutputMode: String, Codable, CaseIterable, Identifiable, Sendable {
     /// Target line first, source line below it — AITrans' classic layout.
@@ -26,6 +50,7 @@ struct TranslationSettings: Codable, Equatable, Sendable {
     var targetLanguage: Language = .zh
     var polish: Bool = true
     var outputMode: TranslationOutputMode = .bilingual
+    var timing: TranslationTiming = .afterTranscription
     var ollamaModel: String = "qwen2.5"
     var apiWorkers: Int = 20
     var apiRetries: Int = 2
@@ -35,7 +60,7 @@ struct TranslationSettings: Codable, Equatable, Sendable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case isEnabled, backend, targetLanguage, polish, outputMode, ollamaModel
+        case isEnabled, backend, targetLanguage, polish, outputMode, timing, ollamaModel
         case apiWorkers, apiRetries, ollamaWorkers, ollamaRetries
     }
 
@@ -47,6 +72,7 @@ struct TranslationSettings: Codable, Equatable, Sendable {
         targetLanguage = try values.decodeIfPresent(Language.self, forKey: .targetLanguage) ?? .zh
         polish = try values.decodeIfPresent(Bool.self, forKey: .polish) ?? true
         outputMode = try values.decodeIfPresent(TranslationOutputMode.self, forKey: .outputMode) ?? .bilingual
+        timing = try values.decodeIfPresent(TranslationTiming.self, forKey: .timing) ?? .afterTranscription
         ollamaModel = try values.decodeIfPresent(String.self, forKey: .ollamaModel) ?? "qwen2.5"
         apiWorkers = try values.decodeIfPresent(Int.self, forKey: .apiWorkers) ?? 20
         apiRetries = try values.decodeIfPresent(Int.self, forKey: .apiRetries) ?? 2
