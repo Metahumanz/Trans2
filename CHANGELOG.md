@@ -1,5 +1,17 @@
 # 更新日志
 
+## Trans2 v0.3.2
+
+_2026-11-11_
+
+### 文档
+- 重写 README，突出 Transcribe + Translation (`a9041fb`)
+
+### 维护
+- 采用 GPL-3.0-or-later 许可证 (`73d06ae`)
+
+**完整变更**：[v0.3.1...v0.3.2](https://github.com/Metahumanz/Trans2/compare/v0.3.1...v0.3.2)
+
 ## Trans2 v0.3.1
 
 _2026-11-11_
