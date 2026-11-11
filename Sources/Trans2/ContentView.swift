@@ -157,6 +157,17 @@ struct MainWindowContent: View {
                 Label(L.tr("button.history"), systemImage: "clock.arrow.circlepath")
             }
 
+            if let update = model.updateInfo {
+                Button {
+                    presentedSheet = .settings(.general)
+                } label: {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .foregroundStyle(Color(nsColor: .systemGreen))
+                }
+                .help(L.tr("settings.update_available", update.version))
+                .accessibilityLabel(Text(L.tr("settings.update_available", update.version)))
+            }
+
             Button {
                 presentedSheet = .settings(.general)
             } label: {
