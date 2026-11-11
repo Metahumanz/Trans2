@@ -1,0 +1,127 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "要发布的版本号（不带 v，必须与 VERSION 文件一致）"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish macOS release
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            VERSION="${INPUT_VERSION#v}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
+            echo "invalid version: $VERSION" >&2
+            exit 1
+          fi
+          FILE_VERSION="$(tr -d '[:space:]' < VERSION)"
+          if [ "$VERSION" != "$FILE_VERSION" ]; then
+            echo "release version ($VERSION) does not match VERSION ($FILE_VERSION); bump VERSION first" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Verify Apple Silicon runner
+        run: |
+          uname -m
+          test "$(uname -m)" = "arm64"
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          if ! command -v cmake >/dev/null 2>&1; then
+            brew install cmake
+          fi
+          cmake --version | head -1
+
+      - name: Cache whisper.cpp runtime
+        uses: actions/cache@v4
+        with:
+          path: .build-tools/whisper.cpp
+          key: whispercpp-v1.9.3-${{ runner.os }}-${{ hashFiles('Scripts/setup-whispercpp.sh') }}
+          restore-keys: |
+            whispercpp-v1.9.3-${{ runner.os }}-
+
+      - name: Build whisper.cpp
+        run: |
+          if [ -x .build-tools/whisper.cpp/build/bin/whisper-cli ]; then
+            echo "using cached whisper-cli"
+          else
+            ./Scripts/setup-whispercpp.sh
+          fi
+
+      - name: Run tests
+        run: swift test --disable-sandbox
+
+      - name: Package app
+        run: ./Scripts/package-app.sh "${{ steps.version.outputs.version }}"
+
+      - name: Generate release notes
+        run: |
+          set -euo pipefail
+          python3 Scripts/changelog.py "${{ steps.version.outputs.version }}" > release-notes.md
+          cat >> release-notes.md <<'EOF'
+
+          ---
+          **安装**：下载 `.dmg`，打开后把 `Trans2.app` 拖进「应用程序」。首次启动请右键「打开」。
+          **要求**：Apple Silicon Mac，macOS 14 或更高。
+          EOF
+          cat release-notes.md
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Trans2-${{ steps.version.outputs.version }}-macos-arm64
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            release-notes.md
+          if-no-files-found: error
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Trans2 v${{ steps.version.outputs.version }}
+          body_path: release-notes.md
+          files: |
+            dist/*.dmg
+            dist/*.zip
+          fail_on_unmatched_files: true
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -7,7 +7,7 @@ import SwiftUI
 // docs/ui-visual-spec.zh-CN.md and docs/design/whispermac-ui-prototype.html.
 
 enum TaskWorkspaceMetrics {
-    static let queueWidth: CGFloat = 236
+    static let queueWidth: CGFloat = 320
     static let workspaceDividerWidth: CGFloat = 1
     // Width-class thresholds measured on the workspace (window content width
     // minus queue and divider). The 40 pt gap between them is hysteresis:
@@ -175,8 +175,6 @@ struct SetupWorkspaceView: View {
     @Environment(\.windowSizeMode) private var windowSizeMode
     let readiness: SetupReadiness
     let openSettings: () -> Void
-    @State private var showsFullOptions = false
-    @State private var isVADAdvancedExpanded = false
 
     private var missingBlockers: Set<RuntimeComponent> {
         if case let .missingRuntime(blockers) = readiness {
@@ -193,11 +191,7 @@ struct SetupWorkspaceView: View {
                 switch readiness {
                 case .emptyQueue:
                     dropInvite
-                    if showsFullOptions {
-                        optionsForm
-                    } else {
-                        defaultsSummary
-                    }
+                    workflowSteps
                 case let .missingRuntime(blockers):
                     if model.inputFiles.isEmpty {
                         if blockers.contains(.whisperCLI) {
@@ -206,13 +200,8 @@ struct SetupWorkspaceView: View {
                         if blockers.contains(.model) {
                             MissingModelPanel(isPrimary: !blockers.contains(.whisperCLI))
                         }
-                        if showsFullOptions {
-                            optionsForm
-                        } else {
-                            defaultsSummary
-                        }
                     } else {
-                        optionsForm
+                        taskOverview
                     }
                 case let .missingVADModel(path):
                     VStack(alignment: .leading, spacing: 12) {
@@ -222,10 +211,10 @@ struct SetupWorkspaceView: View {
                         Button(L.tr("vad.download")) { model.downloadVADModel() }
                             .buttonStyle(.borderedProminent)
                             .disabled(!model.canDownloadRuntimeAssets)
-                        optionsForm
                     }
+                    taskOverview
                 case .ready:
-                    optionsForm
+                    taskOverview
                 }
             }
             .padding(.top, TaskWorkspaceMetrics.contentTopPadding)
@@ -237,7 +226,9 @@ struct SetupWorkspaceView: View {
 
     private var titleBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(L.tr("empty.title"))
+            Text(model.translationSettings.isEnabled
+                ? L.tr("empty.title.translate")
+                : L.tr("empty.title"))
                 .font(.system(size: UITypographyScale.scaled(22), weight: .semibold))
             Text(L.tr("empty.subtitle"))
                 .foregroundStyle(.secondary)
@@ -287,326 +278,180 @@ struct SetupWorkspaceView: View {
         .padding(.vertical, 4)
     }
 
-    private var defaultsSummary: some View {
+    private var workflowSteps: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                SectionHeader(title: L.tr("empty.defaults.title"))
-                Spacer()
-                Button(L.tr("options.adjust")) {
-                    showsFullOptions = true
-                }
-                .buttonStyle(.link)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                defaultsRow(L.tr("label.output_directory"), outputLocationDisplayText(model.outputDirectoryPath))
-                defaultsRow(L.tr("label.export_formats"), formatsSummaryText(model.outputFormats))
-                defaultsRow(L.tr("label.audio_language"), languageDisplayName(forCode: model.sourceLanguage))
-                defaultsRow(L.tr("settings.section.translation"), model.translationSummary)
-                defaultsRow(L.tr("text_context.title"), model.usesTextContext ? L.tr("common.on") : L.tr("common.off"))
-                defaultsRow(L.tr("vad.title"), model.vadSettings.isEnabled ? L.tr("common.on") : L.tr("common.off"))
+            SectionHeader(title: L.tr("workflow.title"))
+            HStack(alignment: .top, spacing: 18) {
+                workflowStep(
+                    number: "1",
+                    title: L.tr("workflow.step1.title"),
+                    detail: L.tr("workflow.step1.detail")
+                )
+                workflowStep(
+                    number: "2",
+                    title: L.tr("workflow.step2.title"),
+                    detail: L.tr("workflow.step2.detail")
+                )
+                workflowStep(
+                    number: "3",
+                    title: L.tr("workflow.step3.title"),
+                    detail: L.tr("workflow.step3.detail")
+                )
             }
         }
     }
 
-    private func defaultsRow(_ label: String, _ value: String) -> some View {
-        LabeledRow(title: label, secondaryTitle: true) {
-            Text(value)
-                .fontWeight(.medium)
-                .lineLimit(1)
-                .truncationMode(.middle)
+    private func workflowStep(number: String, title: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Text(number)
+                    .font(.caption2.bold())
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 18, height: 18)
+                    .background(Circle().fill(Color.accentColor.opacity(0.14)))
+                Text(title)
+                    .font(.system(size: UITypographyScale.scaled(13), weight: .medium))
+            }
+            Text(detail)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .font(.system(size: UITypographyScale.scaled(13)))
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var optionsForm: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 14) {
-                SectionHeader(title: L.tr("options.section.output"))
-                outputLocationRow
-                formatsGrid
+    private var taskOverview: some View {
+        VStack(alignment: .leading, spacing: TaskWorkspaceMetrics.sectionSpacing) {
+            taskSummary
+            if !model.inputFiles.isEmpty, !expectedOutputNames.isEmpty {
+                expectedOutputsSection
             }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 14) {
-                SectionHeader(title: L.tr("options.section.transcribe"))
-                languageRow
-                translateRow
-                textContextRow
-            }
-
-            Divider()
-
-            vadSection
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 14) {
-                SectionHeader(title: L.tr("section.runtime"))
-                accelerationRow
-            }
-
-            Divider()
-
-            readinessSection
         }
     }
 
-    private var outputLocationRow: some View {
-        LabeledRow(title: L.tr("label.output_directory")) {
-            Menu {
-                Button(L.tr("options.output.follow")) {
-                    model.outputDirectoryPath = ""
+    private var taskSummary: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(title: L.tr("summary.title"))
+
+            VStack(alignment: .leading, spacing: 9) {
+                summaryRow(
+                    L.tr("summary.files"),
+                    L.tr(
+                        "summary.files_detail",
+                        model.inputFiles.count,
+                        model.inputMediaFiles.count,
+                        model.inputSubtitleFiles.count
+                    )
+                )
+                summaryRow(L.tr("summary.pipeline"), pipelineText)
+                summaryRow(L.tr("summary.translation"), model.translationSummary)
+                summaryRow(
+                    L.tr("summary.output"),
+                    outputLocationDisplayText(model.outputDirectoryPath)
+                )
+                summaryRow(L.tr("summary.formats"), formatsSummaryText(model.outputFormats))
+                if !model.translationSettings.isEnabled, !model.inputSubtitleFiles.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "info.circle")
+                        Text(L.tr("summary.subtitles_skipped", model.inputSubtitleFiles.count))
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(Color(nsColor: .systemOrange))
                 }
-                if !model.outputDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Button(model.outputDirectoryPath) {}
-                        .disabled(true)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.primary.opacity(0.03))
+            )
+        }
+    }
+
+    private var expectedOutputsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionHeader(title: L.tr("summary.outputs.title"))
+
+            VStack(alignment: .leading, spacing: 7) {
+                ForEach(Array(expectedOutputNames.prefix(5)), id: \.self) { name in
+                    HStack(spacing: 8) {
+                        Image(systemName: "doc.text")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(name)
+                            .font(.system(size: UITypographyScale.scaled(13), design: .monospaced))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: 0)
+                    }
                 }
-                Divider()
-                Button(L.tr("options.output.choose")) {
-                    model.chooseOutputDirectory()
-                }
-            } label: {
-                HStack {
-                    Text(outputLocationDisplayText(model.outputDirectoryPath))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer()
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption2)
+                if expectedOutputNames.count > 5 {
+                    Text(L.tr("summary.outputs.more", expectedOutputNames.count - 5))
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                .contentShape(Rectangle())
             }
-            .frame(minWidth: 320, idealWidth: 380, maxWidth: 560, alignment: .leading)
-            .disabled(model.isBusy)
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.primary.opacity(0.02))
+            )
+
+            Text(L.tr("summary.outputs.location", outputLocationDisplayText(model.outputDirectoryPath)))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 
-    private var formatsGrid: some View {
-        LabeledRow(title: L.tr("label.export_formats")) {
-            VStack(alignment: .leading, spacing: 8) {
-                LazyVGrid(
-                    columns: [
-                        GridItem(.flexible(), alignment: .leading),
-                        GridItem(.flexible(), alignment: .leading),
-                    ],
-                    alignment: .leading,
-                    spacing: 10
-                ) {
-                    formatToggle(.txt)
-                    formatToggle(.srt)
-                    formatToggle(.vtt)
-                    formatToggle(.json)
-                }
-                Text(L.tr("options.formats.hint"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+    private var expectedOutputNames: [String] {
+        guard model.translationSettings.isEnabled || !model.inputMediaFiles.isEmpty else { return [] }
+        let language = model.translationSettings.targetLanguage.rawValue
+        var names: [String] = []
+        let selectedFormats = OutputFormat.allCases.filter { model.outputFormats.contains($0) }
+
+        for url in model.inputMediaFiles {
+            let stem = url.deletingPathExtension().lastPathComponent
+            var formats = selectedFormats
+            if model.translationSettings.isEnabled, !formats.contains(.srt) {
+                formats.insert(.srt, at: 0)
+            }
+            for format in formats {
+                names.append("\(stem).\(format.rawValue)")
+            }
+            if model.translationSettings.isEnabled {
+                names.append("\(stem).\(language).srt")
             }
         }
-    }
 
-    private func formatToggle(_ format: OutputFormat) -> some View {
-        Toggle(L.tr("toggle.export_\(format.rawValue)"), isOn: formatBinding(for: format))
-            .disabled(model.isBusy || model.outputFormats == [format])
-    }
-
-    private func formatBinding(for format: OutputFormat) -> Binding<Bool> {
-        Binding(
-            get: { model.outputFormats.contains(format) },
-            set: { enabled in model.setFormat(format, enabled: enabled) }
-        )
-    }
-
-    private var languageRow: some View {
-        LabeledRow(title: L.tr("label.audio_language")) {
-            Picker(L.tr("label.audio_language"), selection: $model.sourceLanguage) {
-                Text(WhisperLanguage.auto.displayName).tag(WhisperLanguage.autoCode)
-                ForEach(WhisperLanguage.common) { language in
-                    Text(language.displayName).tag(language.code)
-                }
-            }
-            .pickerStyle(.menu)
-            .labelsHidden()
-            .frame(minWidth: 200, idealWidth: 240, maxWidth: 360, alignment: .leading)
-            .disabled(model.isBusy)
-        }
-    }
-
-    private var translateRow: some View {
-        LabeledRow(title: L.tr("options.translate")) {
-            VStack(alignment: .leading, spacing: 4) {
-                Toggle(L.tr("toggle.translate_to_english"), isOn: $model.translatesToEnglish)
-                    .disabled(model.isBusy)
-                Text(L.tr("hint.translate_to_english"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        if model.translationSettings.isEnabled {
+            for url in model.inputSubtitleFiles {
+                let stem = url.deletingPathExtension().lastPathComponent
+                names.append("\(stem).\(language).srt")
             }
         }
+
+        var seen = Set<String>()
+        return names.filter { seen.insert($0).inserted }
     }
 
-    private var textContextRow: some View {
-        LabeledRow(title: L.tr("text_context.title")) {
-            VStack(alignment: .leading, spacing: 4) {
-                Toggle(L.tr("text_context.enable"), isOn: $model.usesTextContext)
-                    .disabled(model.isBusy)
-                Text(L.tr("text_context.hint"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+    private var pipelineText: String {
+        if model.translationSettings.isEnabled {
+            return L.tr("summary.pipeline.translate", model.translationSettings.targetLanguage.displayName)
         }
+        return L.tr("summary.pipeline.transcribe")
     }
 
-    private var vadSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: L.tr("vad.title"))
-            Toggle(L.tr("vad.enable"), isOn: $model.vadSettings.isEnabled)
-                .disabled(model.isBusy)
-
-            if model.vadSettings.isEnabled {
-                HStack(spacing: 8) {
-                    StatusDot(color: model.hasResolvableVADModel ? semanticSuccessColor : semanticWarningColor)
-                    Text(model.hasResolvableVADModel
-                        ? L.tr("vad.model_available", URL(fileURLWithPath: model.resolvedVADModelPath).lastPathComponent)
-                        : L.tr("vad.model_missing_short"))
-                        .font(.caption)
-                        .foregroundStyle(model.hasResolvableVADModel ? AnyShapeStyle(.secondary) : AnyShapeStyle(semanticWarningColor))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    if !model.hasResolvableVADModel {
-                        Button(L.tr("vad.download")) { model.downloadVADModel() }
-                            .buttonStyle(.link)
-                            .disabled(!model.canDownloadRuntimeAssets)
-                    }
-                }
-
-                LabeledRow(title: L.tr("vad.threshold")) {
-                    HStack(spacing: 12) {
-                        Slider(value: $model.vadSettings.threshold, in: 0...1, step: 0.05)
-                            .disabled(model.isBusy)
-                        Text(String(format: "%.2f", model.vadSettings.threshold))
-                            .font(.system(.caption, design: .monospaced))
-                            .frame(width: 42, alignment: .trailing)
-                    }
-                    .frame(maxWidth: 380)
-                }
-
-                DisclosureGroup(L.tr("vad.advanced"), isExpanded: $isVADAdvancedExpanded) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        vadDurationSlider(title: L.tr("vad.min_speech"), value: $model.vadSettings.minSpeechDurationMs, range: 0...2_000, step: 50)
-                        vadDurationSlider(title: L.tr("vad.min_silence"), value: $model.vadSettings.minSilenceDurationMs, range: 0...2_000, step: 50)
-                        vadDurationSlider(title: L.tr("vad.speech_pad"), value: $model.vadSettings.speechPadMs, range: 0...1_000, step: 25)
-                    }
-                    .padding(.top, 8)
-                }
-                .disabled(model.isBusy)
-            }
-        }
-    }
-
-    private func vadDurationSlider(title: String, value: Binding<Int>, range: ClosedRange<Double>, step: Double) -> some View {
-        LabeledRow(title: title) {
-            HStack(spacing: 12) {
-                Slider(
-                    value: Binding(get: { Double(value.wrappedValue) }, set: { value.wrappedValue = Int($0.rounded()) }),
-                    in: range,
-                    step: step
-                )
-                .disabled(model.isBusy)
-                Text(L.tr("vad.milliseconds", Int64(value.wrappedValue)))
-                    .font(.system(.caption, design: .monospaced))
-                    .frame(width: 64, alignment: .trailing)
-            }
-            .frame(maxWidth: 380)
-        }
-    }
-
-    private var accelerationRow: some View {
-        LabeledRow(title: L.tr("label.acceleration_mode")) {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(model.accelerationMode.title)
-                        .fontWeight(.medium)
-                    Text(model.accelerationSummary)
-                        .font(.caption)
-                        .foregroundStyle(model.configurationLooksReady ? AnyShapeStyle(.secondary) : AnyShapeStyle(semanticWarningColor))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                Button(L.tr("options.view_settings")) {
-                    openSettings()
-                }
-                .buttonStyle(.bordered)
-            }
-        }
-    }
-
-    private var readinessSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(title: L.tr("ready.title"))
-
-            if model.vadSettings.isEnabled && !model.hasResolvableVADModel {
-                readinessWarningRow(text: L.tr("vad.model_missing_short")) {
-                    Button(L.tr("vad.download")) { model.downloadVADModel() }
-                        .buttonStyle(.bordered)
-                        .disabled(!model.canDownloadRuntimeAssets)
-                }
-            } else if missingBlockers.isEmpty {
-                if model.inputFiles.isEmpty {
-                    HStack(spacing: 8) {
-                        StatusDot(color: semanticWarningColor)
-                        Text(L.tr("ready.add_media_first"))
-                    }
-                } else {
-                    HStack(spacing: 8) {
-                        StatusDot(color: semanticSuccessColor)
-                        Text(L.tr("ready.files", model.inputFiles.count))
-                            .fontWeight(.medium)
-                        Text(L.tr("ready.output_note"))
-                            .foregroundStyle(.secondary)
-                    }
-                    .textSelection(.enabled)
-                }
-            } else {
-                if missingBlockers.contains(.whisperCLI) {
-                    readinessWarningRow(
-                        text: L.tr("missing.cli.title")
-                    ) {
-                        Button(L.tr("missing.choose_cli")) {
-                            model.chooseWhisperCLI()
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                }
-                if missingBlockers.contains(.model) {
-                    readinessWarningRow(
-                        text: L.tr("missing.model.title")
-                    ) {
-                        Button(L.tr("missing.download_default_model")) {
-                            model.startRuntimeDownload()
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(!model.canDownloadRuntimeAssets)
-                        Button(L.tr("missing.choose_existing_model")) {
-                            model.chooseModel()
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                }
-            }
-        }
-    }
-
-    private func readinessWarningRow<Actions: View>(
-        text: String,
-        @ViewBuilder actions: () -> Actions
-    ) -> some View {
-        HStack(spacing: 8) {
-            StatusDot(color: semanticWarningColor)
-            Text(text)
-            Spacer(minLength: 12)
-            actions()
+    private func summaryRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 64, alignment: .leading)
+            Text(value)
+                .font(.system(size: UITypographyScale.scaled(13)))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
         }
     }
 }
@@ -1029,7 +874,9 @@ struct RunResultView: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(L.tr("result.success.title"))
+                Text(model.lastRunTranslationWasEnabled
+                    ? L.tr("result.success.title.translate")
+                    : L.tr("result.success.title"))
                     .font(.system(size: UITypographyScale.scaled(22), weight: .semibold))
                 Text(L.tr("result.success.detail", inputFileCount, outputFiles.count))
                     .foregroundStyle(.secondary)
@@ -1062,6 +909,10 @@ struct RunResultView: View {
                 outputPicker(outputFiles)
                 Text(L.tr("result.preview_none"))
                     .foregroundStyle(.secondary)
+            }
+
+            if !outputFiles.isEmpty {
+                outputFilesSection(outputFiles)
             }
         }
     }
@@ -1135,6 +986,51 @@ struct RunResultView: View {
                 openAllOutputs()
             }
             .buttonStyle(.bordered)
+        }
+    }
+
+    private func outputFilesSection(_ outputFiles: [URL]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                SectionHeader(title: L.tr("result.outputs.title"))
+                Spacer()
+                Button(L.tr("result.outputs.open_folder")) {
+                    model.openOutputFolderForResult()
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 7) {
+                ForEach(outputFiles, id: \.self) { url in
+                    HStack(spacing: 8) {
+                        Image(systemName: outputIcon(for: url))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 16)
+                        Text(url.lastPathComponent)
+                            .font(.system(size: UITypographyScale.scaled(13)))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: 8)
+                        Button(L.tr("result.outputs.reveal")) {
+                            model.revealOutputFileInFinder(url)
+                        }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                    }
+                }
+            }
+        }
+    }
+
+    private func outputIcon(for url: URL) -> String {
+        switch url.pathExtension.lowercased() {
+        case "srt", "vtt": return "captions.bubble"
+        case "json": return "curlybraces"
+        default: return "doc.text"
         }
     }
 

@@ -38,14 +38,14 @@ struct WindowSizeModeTests {
 
     @Test
     func minimumWindowStaysRegular() {
-        // 980 window - 236 queue - 1 divider = 743 workspace.
-        #expect(WindowSizeMode.next(current: .regular, workspaceWidth: 743) == .regular)
+        // 980 window - 320 queue - 1 divider = 659 workspace.
+        #expect(WindowSizeMode.next(current: .regular, workspaceWidth: 659) == .regular)
     }
 
     @Test
     func typicalLargeWindowExpands() {
-        // 1440 window - 237 = 1203 workspace.
-        #expect(WindowSizeMode.next(current: .regular, workspaceWidth: 1203) == .expanded)
+        // 1440 window - 321 = 1119 workspace.
+        #expect(WindowSizeMode.next(current: .regular, workspaceWidth: 1119) == .expanded)
     }
 
     // MARK: thresholds

@@ -960,6 +960,14 @@ final class AppModel: ObservableObject {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
+    /// Opens the folder of the currently selected result so the whole batch
+    /// is one click away after a run.
+    func openOutputFolderForResult() {
+        let candidates: [URL?] = [selectedPreviewFileID, selectedResultFileID, lastRunOutputFiles.first]
+        guard let url = candidates.compactMap({ $0 }).first else { return }
+        NSWorkspace.shared.open(url.deletingLastPathComponent())
+    }
+
     func cancelTranscription() {
         guard isRunning, !isCancelling else { return }
         isCancelling = true

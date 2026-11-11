@@ -1,7 +1,8 @@
 import SwiftUI
 import TransCore
 
-/// P0.2 window skeleton: fixed 236 pt task queue on the left, a state-driven
+/// P0.2 window skeleton: a fixed-width task rail on the left (queue + the
+/// settings that shape the next run), a state-driven
 /// main workspace on the right, and a persistent 80 pt action bar at the
 /// bottom. Toolbar carries add-media / history / settings; logs, history, and
 /// outputs open as sheets on demand.
@@ -52,7 +53,7 @@ struct MainWindowContent: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                TaskQueueView()
+                TaskSidebarView(openSettings: { presentedSheet = .settings })
                 Divider()
                 mainWorkspace
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -174,129 +175,6 @@ struct MainWindowContent: View {
         case .allOutputs:
             AllOutputsSheet()
         }
-    }
-}
-
-// MARK: - Task queue (left column)
-
-struct TaskQueueView: View {
-    @EnvironmentObject private var model: AppModel
-
-    private var isLocked: Bool { model.isRunning || model.isScanningMedia }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(L.tr("queue.title"))
-                    .font(.system(size: UITypographyScale.scaled(13), weight: .semibold))
-                Spacer()
-                Text(L.tr("label.file_count", model.inputFiles.count))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 8)
-
-            if model.inputFiles.isEmpty {
-                VStack(spacing: 6) {
-                    Text(L.tr("queue.empty.title"))
-                        .font(.system(size: UITypographyScale.scaled(13)))
-                    Text(L.tr("queue.empty.detail"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                .padding(.horizontal, 16)
-                .frame(maxWidth: .infinity, alignment: .center)
-                Spacer()
-            } else {
-                List(model.inputFiles, id: \.path) { url in
-                    queueRow(url)
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-            }
-
-            Divider()
-            footer
-        }
-        .frame(width: TaskWorkspaceMetrics.queueWidth)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(Text(L.tr("queue.title")))
-    }
-
-    private func queueRow(_ url: URL) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: iconForExtension(url.pathExtension))
-                .font(.system(size: UITypographyScale.scaled(14)))
-                .foregroundStyle(.secondary)
-                .frame(width: 18)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(url.lastPathComponent)
-                    .font(.system(size: UITypographyScale.scaled(13)))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text(url.deletingLastPathComponent().path)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-
-            Spacer(minLength: 0)
-
-            if !isLocked {
-                Button {
-                    model.removeInputFile(url)
-                } label: {
-                    Image(systemName: "xmark.circle")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel(L.tr("button.remove"))
-                .accessibilityValue(Text(url.lastPathComponent))
-            }
-        }
-        .padding(.vertical, 8)
-        .help(url.path)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text("\(url.lastPathComponent), \(url.deletingLastPathComponent().path)"))
-    }
-
-    private var footer: some View {
-        HStack(spacing: 8) {
-            if isLocked {
-                Image(systemName: "lock")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text(L.tr("queue.locked"))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text(L.tr("privacy.local"))
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(2)
-            }
-            Spacer()
-            Button(L.tr("button.clear_list")) {
-                model.clearInputFiles()
-            }
-            .buttonStyle(.borderless)
-            .font(.caption)
-            .disabled(model.inputFiles.isEmpty || model.isBusy)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-    }
-
-    private func iconForExtension(_ pathExtension: String) -> String {
-        let ext = pathExtension.lowercased()
-        if ext == "srt" { return "captions.bubble" }
-        let videoExtensions: Set<String> = ["mp4", "mov", "m4v"]
-        return videoExtensions.contains(ext) ? "film" : "music.note"
     }
 }
 
@@ -644,9 +522,6 @@ struct SettingsSheet: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
 
-    @State private var showsProviderSheet = false
-    @State private var providerImportMessage: String?
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -663,110 +538,6 @@ struct SettingsSheet: View {
                     .pickerStyle(.menu)
                     .labelsHidden()
                     .frame(width: 200, alignment: .leading)
-                }
-                .padding(.vertical, 4)
-            }
-
-            GroupBox(L.tr("settings.section.translation")) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Toggle(L.tr("translation.enabled"), isOn: $model.translationSettings.isEnabled)
-
-                    if model.translationSettings.isEnabled {
-                        LabeledRow(title: L.tr("translation.engine")) {
-                            Picker(L.tr("translation.engine"), selection: $model.translationSettings.backend) {
-                                Text(L.tr("translation.engine.api")).tag(Engine.api)
-                                Text(L.tr("translation.engine.ollama")).tag(Engine.ollama)
-                            }
-                            .pickerStyle(.segmented)
-                            .labelsHidden()
-                            .frame(width: 220, alignment: .leading)
-                        }
-
-                        LabeledRow(title: L.tr("translation.target_language")) {
-                            Picker(L.tr("translation.target_language"), selection: $model.translationSettings.targetLanguage) {
-                                ForEach(Language.allCases, id: \.self) { language in
-                                    Text(language.displayName).tag(language)
-                                }
-                            }
-                            .pickerStyle(.menu)
-                            .labelsHidden()
-                            .frame(width: 200, alignment: .leading)
-                        }
-
-                        if model.translationSettings.backend == .api {
-                            LabeledRow(title: L.tr("translation.provider")) {
-                                HStack(spacing: 8) {
-                                    if model.providers.isEmpty {
-                                        Text(L.tr("translation.provider.none"))
-                                            .foregroundStyle(.secondary)
-                                    } else {
-                                        Picker(
-                                            L.tr("translation.provider"),
-                                            selection: Binding(
-                                                get: { model.activeProviderID ?? model.providers.first?.id ?? "" },
-                                                set: { model.setActiveProvider(id: $0) }
-                                            )
-                                        ) {
-                                            ForEach(model.providers) { provider in
-                                                Text(provider.name).tag(provider.id)
-                                            }
-                                        }
-                                        .pickerStyle(.menu)
-                                        .labelsHidden()
-                                        .frame(width: 220, alignment: .leading)
-                                    }
-                                    Button(L.tr("translation.manage_providers")) { showsProviderSheet = true }
-                                }
-                            }
-                            LabeledRow(title: L.tr("translation.model")) {
-                                Text(model.translationModelName.isEmpty ? L.tr("translation.model.none") : model.translationModelName)
-                                    .font(.callout.monospaced())
-                                    .foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                            }
-                        } else {
-                            LabeledRow(title: L.tr("translation.ollama_model")) {
-                                TextField("qwen2.5", text: $model.translationSettings.ollamaModel)
-                                    .textFieldStyle(.roundedBorder)
-                                    .frame(width: 220)
-                            }
-                        }
-
-                        LabeledRow(title: L.tr("translation.output_mode")) {
-                            Picker(L.tr("translation.output_mode"), selection: $model.translationSettings.outputMode) {
-                                ForEach(TranslationOutputMode.allCases) { mode in
-                                    Text(mode.title).tag(mode)
-                                }
-                            }
-                            .pickerStyle(.menu)
-                            .labelsHidden()
-                            .frame(width: 220, alignment: .leading)
-                        }
-
-                        Toggle(L.tr("translation.polish"), isOn: $model.translationSettings.polish)
-
-                        HStack(spacing: 8) {
-                            Text(model.translationSummary)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                            Spacer()
-                            Button(L.tr("translation.import_aitrans")) {
-                                let count = model.importProvidersFromAITrans(announce: false)
-                                providerImportMessage = count > 0
-                                    ? L.tr("translation.providers.imported", count)
-                                    : L.tr("translation.providers.import_none")
-                            }
-                            .font(.caption)
-                        }
-                        if let providerImportMessage {
-                            Text(providerImportMessage)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
                 }
                 .padding(.vertical, 4)
             }
@@ -914,17 +685,6 @@ struct SettingsSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(width: 680, height: 720)
-        .sheet(isPresented: $showsProviderSheet) {
-            TranslationProviderSheet()
-                .environmentObject(model)
-        }
-        #if DEBUG
-        .onAppear {
-            if ProcessInfo.processInfo.environment["TRANS2_DEBUG_OPEN_PROVIDERS"] == "1" {
-                showsProviderSheet = true
-            }
-        }
-        #endif
     }
 
     private var vadCLICapabilityMessage: String {
