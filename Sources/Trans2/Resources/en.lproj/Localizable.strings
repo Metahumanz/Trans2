@@ -457,7 +457,3 @@
 "settings.open_release_page" = "Open release page";
 "settings.update_downloaded" = "Downloaded to %@";
 "settings.show_download" = "Show in Finder";
-"settings.private_repo" = "Private repository updates";
-"settings.github_token" = "GitHub token";
-"settings.github_token_hint" = "A private repository returns 404 anonymously. Create a read-only fine-grained token with Contents: Read and paste it here. Leave empty for a public repository. The token is stored in the local secrets.json.";
-"settings.update_token_error" = "Could not save the GitHub token: %@";

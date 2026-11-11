@@ -211,19 +211,6 @@ private struct GeneralSettingsTab: View {
                             .font(.caption)
                         }
                     }
-
-                    DisclosureGroup(L.tr("settings.private_repo")) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            SecureField(L.tr("settings.github_token"), text: $model.githubUpdateToken)
-                                .textFieldStyle(.roundedBorder)
-                            Text(L.tr("settings.github_token_hint"))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .padding(.top, 4)
-                    }
-                    .font(.caption)
                 }
                 .padding(.vertical, 4)
             }

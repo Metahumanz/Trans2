@@ -37,7 +37,7 @@ whisper.cpp 转写能力和 [AItrans](../AItrans) 的字幕翻译内核合成一
 - **双语字幕**：默认输出「译文在上、原文在下」的 `xxx.<lang>.srt`，也可以只输出译文。
 - **提供商管理**：9 个预设、增删改、切换、连通性测试；密钥保存在本机 `secrets.json`（0600），不进 `providers.json`。
 - **从 AItrans 一键导入**：首次启动自动读取 `~/Library/Application Support/AITrans/` 里的提供商与密钥，不用重填 Key。
-- **应用内检查更新**：启动时可选自动检查 GitHub Releases；发现新版本可下载 dmg/zip 或打开发布页。公开仓库直接可用；私有仓库需要在「设置 → 通用 → 私有仓库更新」填一个只读 GitHub Token。
+- **应用内检查更新**：启动时可选自动检查 GitHub Releases；发现新版本可下载 dmg/zip 或打开发布页。仓库公开，无需任何 Token。
 - **沿用 WhisperMac 的运行时**：首次启动会优先复用 `~/Library/Application Support/WhisperMac/` 里已有的 whisper-cli、模型、Core ML encoder 和 Silero VAD 模型，不重复下载 1.5 GB。
 - **界面**：English / 简体中文 / 日本語，跟随系统或手动切换。
 
@@ -159,7 +159,7 @@ git push origin main --tags
 - 仅 macOS / Apple Silicon；Windows 版本尚未开始。
 - 不是字幕编辑器：没有时间轴拖动、逐句校对界面。
 - 发布产物为 ad-hoc 签名，首次打开需右键「打开」或 `xattr -cr`。
-- 应用内更新检查依赖 GitHub Releases。仓库是 private 时，匿名请求会 404，需要在设置里填只读 Token；把仓库设为公开后可以留空。
+- 应用内更新检查依赖 GitHub Releases 的公开 API。
 - 翻译会消耗所选服务的额度；密钥以明文保存在本机文件，请自行保护用户目录。
 - 同一次批量里若两个同名 `.srt` 指向同一个统一输出目录，后一个会覆盖前一个。
 

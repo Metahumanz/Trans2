@@ -69,9 +69,6 @@ final class AppModel: ObservableObject {
     @Published var autoCheckUpdates: Bool {
         didSet { defaults.set(autoCheckUpdates, forKey: Keys.autoCheckUpdates) }
     }
-    @Published var githubUpdateToken: String {
-        didSet { persistUpdateToken() }
-    }
     @Published private(set) var updateInfo: UpdateInfo?
     @Published private(set) var isCheckingForUpdates = false
     @Published private(set) var isDownloadingUpdate = false
@@ -121,7 +118,6 @@ final class AppModel: ObservableObject {
 
     private let defaults: UserDefaults
     private let providerStore: ProviderStore
-    private let updateSecrets: FileSecretStore
     private let supportDirectory: URL
     private let vadModelSearchRoots: [URL]?
     private let huggingFaceEnvironment: [String: String]
@@ -161,7 +157,6 @@ final class AppModel: ObservableObject {
         self.completionNotifier = completionNotifier ?? CompletionNotifier()
         self.defaults = defaults
         self.supportDirectory = supportDirectory
-        self.updateSecrets = FileSecretStore(path: supportDirectory.appending(path: "secrets.json"))
         self.providerStore = providerStore
             ?? ProviderStore(secrets: FileSecretStore(path: supportDirectory.appending(path: "secrets.json")))
         self.vadModelSearchRoots = vadModelSearchRoots
@@ -209,7 +204,6 @@ final class AppModel: ObservableObject {
 
         inputFiles = []
         autoCheckUpdates = defaults.object(forKey: Keys.autoCheckUpdates) as? Bool ?? true
-        githubUpdateToken = (try? updateSecrets.secret(for: Self.updateTokenKey)) ?? ""
         appLanguage = AppLanguage(storedValue: defaults.string(forKey: Keys.appLanguage))
         outputDirectoryPath = defaults.string(forKey: Keys.outputDirectoryPath) ?? ""
         whisperCLIPath = initialWhisperCLIPath
@@ -330,27 +324,8 @@ final class AppModel: ObservableObject {
 
     // MARK: - Updates
 
-    private static let updateTokenKey = "github-update"
-
     var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
-    }
-
-    private var updateToken: String? {
-        let trimmed = githubUpdateToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    private func persistUpdateToken() {
-        do {
-            if let token = updateToken {
-                try updateSecrets.setSecret(token, for: Self.updateTokenKey)
-            } else {
-                try updateSecrets.deleteSecret(for: Self.updateTokenKey)
-            }
-        } catch {
-            appendLog(L.tr("settings.update_token_error", error.localizedDescription))
-        }
     }
 
     func checkForUpdates(manual: Bool = true) {
@@ -361,7 +336,7 @@ final class AppModel: ObservableObject {
         Task {
             defer { isCheckingForUpdates = false }
             do {
-                let checker = UpdateChecker(token: updateToken)
+                let checker = UpdateChecker()
                 if let info = try await checker.check() {
                     updateInfo = info
                     updateStatusText = ""
@@ -388,7 +363,7 @@ final class AppModel: ObservableObject {
         Task {
             defer { isDownloadingUpdate = false }
             do {
-                let file = try await UpdateDownloader.download(updateInfo, token: updateToken)
+                let file = try await UpdateDownloader.download(updateInfo)
                 downloadedUpdate = file
                 updateStatusText = L.tr("settings.update_downloaded", file.path)
                 NSWorkspace.shared.activateFileViewerSelecting([file])

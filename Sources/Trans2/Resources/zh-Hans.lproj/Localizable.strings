@@ -457,7 +457,3 @@
 "settings.open_release_page" = "打开发布页";
 "settings.update_downloaded" = "已下载到 %@";
 "settings.show_download" = "在 Finder 中显示";
-"settings.private_repo" = "私有仓库更新";
-"settings.github_token" = "GitHub Token";
-"settings.github_token_hint" = "私有仓库匿名请求会返回 404。请创建一个只读的 Fine-grained token（Contents: Read）填在这里；公开仓库留空即可。Token 保存在本机 secrets.json。";
-"settings.update_token_error" = "保存 GitHub Token 失败：%@";
