@@ -457,3 +457,9 @@
 "settings.open_release_page" = "打开发布页";
 "settings.update_downloaded" = "已下载到 %@";
 "settings.show_download" = "在 Finder 中显示";
+"translation.suffix" = "文件名后缀";
+"translation.suffix.placeholder" = ".{lang}";
+"translation.suffix.reset" = "恢复默认";
+"translation.suffix.preview" = "输出文件名：%@";
+"translation.suffix.hint" = "加在 .srt 之前。{lang} 会替换成目标语言代码（zh / en / ja / ko），其他字符原样保留。";
+"translation.suffix.cleanup" = "写入文件时会忽略空格和路径字符。";

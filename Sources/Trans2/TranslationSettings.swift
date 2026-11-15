@@ -51,6 +51,9 @@ struct TranslationSettings: Codable, Equatable, Sendable {
     var polish: Bool = true
     var outputMode: TranslationOutputMode = .bilingual
     var timing: TranslationTiming = .afterTranscription
+    /// Suffix inserted before `.srt` for translated files, AITrans-style.
+    /// `{lang}` expands to the target language code (zh / en / ja / ko).
+    var suffix: String = TranslationSettings.defaultSuffix
     var ollamaModel: String = "qwen2.5"
     var apiWorkers: Int = 20
     var apiRetries: Int = 2
@@ -60,7 +63,7 @@ struct TranslationSettings: Codable, Equatable, Sendable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case isEnabled, backend, targetLanguage, polish, outputMode, timing, ollamaModel
+        case isEnabled, backend, targetLanguage, polish, outputMode, timing, suffix, ollamaModel
         case apiWorkers, apiRetries, ollamaWorkers, ollamaRetries
     }
 
@@ -73,6 +76,7 @@ struct TranslationSettings: Codable, Equatable, Sendable {
         polish = try values.decodeIfPresent(Bool.self, forKey: .polish) ?? true
         outputMode = try values.decodeIfPresent(TranslationOutputMode.self, forKey: .outputMode) ?? .bilingual
         timing = try values.decodeIfPresent(TranslationTiming.self, forKey: .timing) ?? .afterTranscription
+        suffix = try values.decodeIfPresent(String.self, forKey: .suffix) ?? TranslationSettings.defaultSuffix
         ollamaModel = try values.decodeIfPresent(String.self, forKey: .ollamaModel) ?? "qwen2.5"
         apiWorkers = try values.decodeIfPresent(Int.self, forKey: .apiWorkers) ?? 20
         apiRetries = try values.decodeIfPresent(Int.self, forKey: .apiRetries) ?? 2
@@ -89,6 +93,43 @@ struct TranslationSettings: Codable, Equatable, Sendable {
         if ollamaModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             ollamaModel = "qwen2.5"
         }
+        if Self.cleanedSuffix(suffix).isEmpty {
+            suffix = Self.defaultSuffix
+        }
+    }
+
+    /// Default keeps the historical `movie.zh.srt` naming.
+    static let defaultSuffix = ".{lang}"
+    static let languageToken = "{lang}"
+
+    /// Characters that would change the path or break a filename.
+    private static let invalidSuffixCharacters: Set<Character> = ["<", ">", ":", "\"", "/", "\\", "|", "?", "*"]
+
+    /// Drops whitespace, control characters and path separators. Applied both
+    /// to the preview and to the real output name, so a bad suffix can never
+    /// produce an unusable path.
+    static func cleanedSuffix(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let kept = trimmed.filter { character in
+            if invalidSuffixCharacters.contains(character) { return false }
+            if let ascii = character.asciiValue, ascii < 32 { return false }
+            return true
+        }
+        return kept.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The suffix actually used for `language`; falls back to the default when
+    /// the user typed only invalid characters.
+    func resolvedSuffix(for language: Language) -> String {
+        let cleaned = Self.cleanedSuffix(suffix)
+        let template = cleaned.isEmpty ? Self.defaultSuffix : cleaned
+        return template.replacingOccurrences(of: Self.languageToken, with: language.rawValue)
+    }
+
+    /// True when the raw value differs from what will be written; the settings
+    /// UI uses this to warn instead of silently rewriting the field.
+    var suffixNeedsCleanup: Bool {
+        Self.cleanedSuffix(suffix) != suffix
     }
 
     var workers: Int {
@@ -163,6 +204,7 @@ struct SRTTranslationService {
         language: Language,
         outputMode: TranslationOutputMode,
         polish: Bool,
+        suffix: String = TranslationSettings.defaultSuffix,
         workers: Int,
         polishWorkers: Int = Spec.defaultPolishWorkers,
         outputDirectory: URL? = nil,
@@ -206,7 +248,12 @@ struct SRTTranslationService {
         }
 
         let assembled = Self.assemble(blocks, translations: translations, mode: outputMode)
-        let outputURL = Self.outputURL(for: source, language: language, outputDirectory: outputDirectory)
+        let outputURL = Self.outputURL(
+            for: source,
+            language: language,
+            suffix: suffix,
+            outputDirectory: outputDirectory
+        )
         try assembled.write(to: outputURL, atomically: true, encoding: .utf8)
 
         return SRTTranslationOutcome(
@@ -218,10 +265,21 @@ struct SRTTranslationService {
         )
     }
 
-    static func outputURL(for source: URL, language: Language, outputDirectory: URL? = nil) -> URL {
+    static func outputURL(
+        for source: URL,
+        language: Language,
+        suffix: String = TranslationSettings.defaultSuffix,
+        outputDirectory: URL? = nil
+    ) -> URL {
         let stem = source.deletingPathExtension().lastPathComponent
         let directory = outputDirectory ?? source.deletingLastPathComponent()
-        return directory.appendingPathComponent("\(stem).\(language.rawValue).srt")
+        let cleaned = TranslationSettings.cleanedSuffix(suffix)
+        let template = cleaned.isEmpty ? TranslationSettings.defaultSuffix : cleaned
+        let resolved = template.replacingOccurrences(
+            of: TranslationSettings.languageToken,
+            with: language.rawValue
+        )
+        return directory.appendingPathComponent("\(stem)\(resolved).srt")
     }
 
     /// Bilingual keeps the source line under the translation (AITrans layout);

@@ -500,6 +500,40 @@ private struct TranslationSettingsTab: View {
                             .frame(width: 240, alignment: .leading)
                         }
 
+                        LabeledRow(title: L.tr("translation.suffix")) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 8) {
+                                    TextField(
+                                        L.tr("translation.suffix.placeholder"),
+                                        text: $model.translationSettings.suffix
+                                    )
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.callout.monospaced())
+                                    .frame(width: 220)
+
+                                    Button(L.tr("translation.suffix.reset")) {
+                                        model.translationSettings.suffix = TranslationSettings.defaultSuffix
+                                    }
+                                    .controlSize(.small)
+                                }
+                                Text(suffixPreview)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Text(L.tr("translation.suffix.hint"))
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                if model.translationSettings.suffixNeedsCleanup {
+                                    Text(L.tr("translation.suffix.cleanup"))
+                                        .font(.caption2)
+                                        .foregroundStyle(Color(nsColor: .systemOrange))
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
                         Toggle(L.tr("translation.polish"), isOn: $model.translationSettings.polish)
 
                         if !translationProviderReady {
@@ -548,6 +582,13 @@ private struct TranslationSettingsTab: View {
                 }
             }
         }
+    }
+
+    /// Shows the exact filename a translated `movie.srt` would get.
+    private var suffixPreview: String {
+        let language = model.translationSettings.targetLanguage
+        let resolved = model.translationSettings.resolvedSuffix(for: language)
+        return L.tr("translation.suffix.preview", "movie\(resolved).srt")
     }
 
     private var providerSelection: Binding<String> {

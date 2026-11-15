@@ -32,6 +32,7 @@
   - **全部转写完成后**：整批转写结束，再统一翻译，适合先检查原文；
   - **边转写边翻译**：每转完一个文件就开始翻译，同时继续转写下一个，批量任务总耗时更短。
 - **双语字幕**：默认输出 `xxx.<lang>.srt`，译文在上、原文在下；也可以只输出译文。
+- **可自定义后缀**：翻译后的文件名后缀可改，支持 `{lang}` 占位符（如 `_translated`、`_{lang}_sub`），设置里实时预览最终文件名。
 - **提供商管理**：预设、增删改、切换、连通性测试；密钥保存在本机 `secrets.json`（0600），不写进 `providers.json`。
 - **从 AItrans 一键导入**：首次启动自动读取 `~/Library/Application Support/AITrans/` 里的提供商与密钥，不用重填 Key。
 - **沿用 WhisperMac 的运行时**：优先复用 `~/Library/Application Support/WhisperMac/` 里已有的 whisper-cli、模型、Core ML encoder 和 Silero VAD 模型，不重复下载 1.5 GB。
@@ -100,12 +101,13 @@ swift test --disable-sandbox
 
 默认写在源文件旁边：
 
-| 输入 | 产物 |
+| 输入 | 产物（默认后缀 `.{lang}`） |
 | --- | --- |
 | `movie.mp4` | `movie.txt`、`movie.srt`、`movie.zh.srt` |
 | `existing.srt` | `existing.zh.srt`（设置了统一输出目录时写到那里） |
 
 - `movie.srt` 是 whisper 原文，`movie.zh.srt` 是翻译结果（默认双语）。
+- 后缀可在「设置 → 翻译 → 文件名后缀」修改：填 `_translated` 得到 `movie_translated.srt`，填 `_{lang}` 得到 `movie_zh.srt`；空格和路径字符在写文件时会被忽略。
 - 翻译失败不会丢掉转写结果：失败写进日志，结果页会提示失败段数。
 - 只放 `.srt` 时不需要 whisper-cli 或模型。
 

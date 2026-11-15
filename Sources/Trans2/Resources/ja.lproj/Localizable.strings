@@ -457,3 +457,9 @@
 "settings.open_release_page" = "リリースページを開く";
 "settings.update_downloaded" = "%@ にダウンロードしました";
 "settings.show_download" = "Finder に表示";
+"translation.suffix" = "ファイル名の接尾辞";
+"translation.suffix.placeholder" = ".{lang}";
+"translation.suffix.reset" = "既定値に戻す";
+"translation.suffix.preview" = "出力ファイル名: %@";
+"translation.suffix.hint" = ".srt の前に付きます。{lang} は翻訳先の言語コード（zh / en / ja / ko）に置き換わり、それ以外はそのまま使われます。";
+"translation.suffix.cleanup" = "ファイル書き込み時、空白とパス記号は無視されます。";

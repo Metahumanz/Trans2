@@ -262,6 +262,10 @@ final class AppModel: ObservableObject {
            let timing = TranslationTiming(rawValue: raw) {
             translationSettings.timing = timing
         }
+        if let suffix = ProcessInfo.processInfo.environment["TRANS2_DEBUG_TRANSLATION_SUFFIX"],
+           !suffix.isEmpty {
+            translationSettings.suffix = suffix
+        }
         #endif
     }
 
@@ -1663,6 +1667,7 @@ final class AppModel: ObservableObject {
                 language: snapshot.translation.targetLanguage,
                 outputMode: snapshot.translation.outputMode,
                 polish: snapshot.translation.polish,
+                suffix: snapshot.translation.suffix,
                 workers: snapshot.translation.workers,
                 polishWorkers: snapshot.translation.backend == .api
                     ? min(snapshot.translation.workers, Spec.defaultPolishWorkers)
@@ -1715,6 +1720,7 @@ final class AppModel: ObservableObject {
                     language: snapshot.translation.targetLanguage,
                     outputMode: snapshot.translation.outputMode,
                     polish: snapshot.translation.polish,
+                    suffix: snapshot.translation.suffix,
                     workers: snapshot.translation.workers,
                     polishWorkers: snapshot.translation.backend == .api
                         ? min(snapshot.translation.workers, Spec.defaultPolishWorkers)

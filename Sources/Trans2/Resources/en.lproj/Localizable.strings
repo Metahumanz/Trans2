@@ -457,3 +457,9 @@
 "settings.open_release_page" = "Open release page";
 "settings.update_downloaded" = "Downloaded to %@";
 "settings.show_download" = "Show in Finder";
+"translation.suffix" = "Filename suffix";
+"translation.suffix.placeholder" = ".{lang}";
+"translation.suffix.reset" = "Reset";
+"translation.suffix.preview" = "Output name: %@";
+"translation.suffix.hint" = "Added before .srt. {lang} becomes the target language code (zh / en / ja / ko); everything else is literal.";
+"translation.suffix.cleanup" = "Spaces and path characters are ignored when writing the file.";

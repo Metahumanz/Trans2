@@ -252,3 +252,68 @@ extension AppModelPipelineTests {
         #expect(model.lastTranslationFailureCount == 0)
     }
 }
+
+extension AppModelPipelineTests {
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["TRANS2_E2E"] == "1"))
+    func customSuffixIsUsedForTranslatedFiles() async throws {
+        let apiBase = ProcessInfo.processInfo.environment["TRANS2_E2E_API"] ?? "http://127.0.0.1:8765/v1"
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "trans2-suffix-e2e-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let support = root.appending(path: "support", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let suiteName = "trans2-suffix-e2e-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        var translation = TranslationSettings()
+        translation.isEnabled = true
+        translation.backend = .api
+        translation.targetLanguage = .zh
+        translation.polish = false
+        translation.outputMode = .bilingual
+        translation.suffix = "_{lang}_sub"
+        defaults.set(try JSONEncoder().encode(translation), forKey: "translationSettings")
+
+        let store = ProviderStore(secrets: MemorySecretStore())
+        _ = try store.upsert(
+            Provider(id: "mock", name: "Mock", baseURL: apiBase, model: "mock", apiKey: "k"),
+            activate: true
+        )
+        try store.save(to: support.appending(path: "providers.json"))
+
+        let model = AppModel(
+            completionNotifier: CompletionNotifier(isEligibleForNotifications: { false }),
+            defaults: defaults,
+            providerStore: store,
+            supportDirectory: support
+        )
+
+        let source = root.appending(path: "clip.srt")
+        try """
+        1
+        00:00:01,000 --> 00:00:02,000
+        Custom suffix check
+
+        """.write(to: source, atomically: true, encoding: .utf8)
+
+        model.addMediaURLs([source])
+        await model.waitForMediaScan()
+        #expect(model.canStart)
+
+        model.startTranscription()
+        for _ in 0..<120 {
+            if !model.isRunning, model.lastOutcome != nil { break }
+            try await Task.sleep(for: .milliseconds(200))
+        }
+
+        guard case .succeeded = model.lastOutcome else {
+            Issue.record("run failed: \(String(describing: model.lastOutcome)); \(model.logsText)")
+            return
+        }
+        let translated = root.appending(path: "clip_zh_sub.srt")
+        #expect(FileManager.default.fileExists(atPath: translated.path))
+        #expect(model.lastRunOutputFiles.contains(translated))
+    }
+}

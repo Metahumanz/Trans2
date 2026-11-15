@@ -405,7 +405,9 @@ struct SetupWorkspaceView: View {
 
     private var expectedOutputNames: [String] {
         guard model.translationSettings.isEnabled || !model.inputMediaFiles.isEmpty else { return [] }
-        let language = model.translationSettings.targetLanguage.rawValue
+        let suffix = model.translationSettings.resolvedSuffix(
+            for: model.translationSettings.targetLanguage
+        )
         var names: [String] = []
         let selectedFormats = OutputFormat.allCases.filter { model.outputFormats.contains($0) }
 
@@ -419,14 +421,14 @@ struct SetupWorkspaceView: View {
                 names.append("\(stem).\(format.rawValue)")
             }
             if model.translationSettings.isEnabled {
-                names.append("\(stem).\(language).srt")
+                names.append("\(stem)\(suffix).srt")
             }
         }
 
         if model.translationSettings.isEnabled {
             for url in model.inputSubtitleFiles {
                 let stem = url.deletingPathExtension().lastPathComponent
-                names.append("\(stem).\(language).srt")
+                names.append("\(stem)\(suffix).srt")
             }
         }
 
