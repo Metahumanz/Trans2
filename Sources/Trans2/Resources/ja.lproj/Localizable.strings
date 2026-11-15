@@ -483,3 +483,10 @@
 "queue.state.working" = "処理中";
 "queue.state.done" = "完了";
 "queue.state.failed" = "失敗";
+"stage.extracting_audio_progress" = "音声を抽出中 %d%%";
+"transcription.network_volume" = "ソースはネットワークボリューム上にあります（%@）。読み込み速度はネットワークに制限されます。";
+"transcription.audio_prep_file_finished" = "音声の準備完了: %@（%.1f 秒）";
+"transcription.av_fallback" = "AVFoundation で読み取れませんでした（%@）。afconvert に切り替えます。";
+"audio.error.no_track" = "%@ に音声トラックがありません。";
+"audio.error.reader_failed" = "音声を読み取れません: %@";
+"audio.error.sample_buffer" = "音声サンプルの読み取りに失敗しました。";

@@ -1272,6 +1272,23 @@ final class AppModel: ObservableObject {
                         self.overallProgress = preparationProgress * 0.18 * (snapshot.translation.isEnabled ? 0.85 : 1.0)
                     }
                 },
+                onInputAudioProgress: { [weak self] index, fraction in
+                    await MainActor.run {
+                        guard let self else { return }
+                        self.currentStageDescription = L.tr(
+                            "stage.extracting_audio_progress",
+                            Int((fraction * 100).rounded())
+                        )
+                        // Real extraction progress replaces the 12% stage floor.
+                        self.currentFileProgress = 0.03 + 0.15 * fraction
+                        let preparationProgress = min(
+                            (Double(index) + self.currentFileProgress) / Double(max(totalFiles, 1)),
+                            1.0
+                        )
+                        self.overallProgress = preparationProgress * 0.18
+                            * (snapshot.translation.isEnabled ? 0.85 : 1.0)
+                    }
+                },
                 onStageChange: { [weak self] stage in
                     await MainActor.run {
                         guard let self else { return }
@@ -1588,6 +1605,23 @@ final class AppModel: ObservableObject {
                         default:
                             break
                         }
+                        self.overallProgress = self.pipelineProgress(
+                            fileIndex: index,
+                            mediaCount: mediaCount,
+                            fileFraction: self.currentFileProgress,
+                            translatedFiles: self.pipelinedTranslatedFiles
+                        )
+                    }
+                },
+                onInputAudioProgress: { [weak self] index, fraction in
+                    await MainActor.run {
+                        guard let self else { return }
+                        self.currentStageDescription = L.tr(
+                            "stage.extracting_audio_progress",
+                            Int((fraction * 100).rounded())
+                        )
+                        // Real extraction progress replaces the 12% stage floor.
+                        self.currentFileProgress = 0.03 + 0.15 * fraction
                         self.overallProgress = self.pipelineProgress(
                             fileIndex: index,
                             mediaCount: mediaCount,

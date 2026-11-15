@@ -18,6 +18,7 @@ struct TranscriptionService {
         usesTextContext: Bool = false,
         vadSettings: VADSettings = .default,
         onInputStageChange: @escaping @Sendable (Int, TranscriptionStage) async -> Void,
+        onInputAudioProgress: (@Sendable (Int, Double) async -> Void)? = nil,
         onStageChange: @escaping @Sendable (TranscriptionStage) async -> Void,
         onLog: @escaping @Sendable (String) async -> Void,
         onTranscriptionProgress: @escaping @Sendable (Double) async -> Void,
@@ -52,25 +53,22 @@ struct TranscriptionService {
             await onLog(L.tr("transcription.prepare_file", input.inputURL.path))
             await onInputStageChange(index, .extractingAudio)
 
-            let audioPreparationArguments = [
-                "-f", "WAVE",
-                "-d", "LEI16@16000",
-                "-c", "1",
-                input.inputURL.path,
-                wavURLs[index].path,
-            ]
-            let audioPreparationResult = try await TranscriptionRunLog.run(
-                executable: audioPreprocessorPath,
-                arguments: audioPreparationArguments,
-                log: runLog,
-                onOutput: { stream, line in
-                    guard let filtered = CommandLogFilter.filteredLine(for: stream, tool: .audioPreprocessor, line: line) else {
-                        return
-                    }
-                    await onLog("[afconvert \(stream.label)] \(filtered)")
-                }
+            let fileStartedAt = Date()
+            let command = try await prepareAudio(
+                input: input.inputURL,
+                wavURL: wavURLs[index],
+                runLog: runLog,
+                onProgress: { fraction in
+                    await onInputAudioProgress?(index, fraction)
+                },
+                onLog: onLog
             )
-            audioPreparationCommands.append(audioPreparationResult.command)
+            audioPreparationCommands.append(command)
+            await onLog(L.tr(
+                "transcription.audio_prep_file_finished",
+                input.inputURL.lastPathComponent,
+                Date().timeIntervalSince(fileStartedAt)
+            ))
         }
         await onLog(L.tr("transcription.audio_prep_finished", Date().timeIntervalSince(audioPreparationStartedAt)))
 
@@ -153,6 +151,53 @@ struct TranscriptionService {
             prefixes.append(prefix)
         }
         return prefixes
+    }
+
+    /// AVFoundation streams the interleaved file sequentially and reports
+    /// progress; afconvert stays as a fallback for containers it rejects.
+    private func prepareAudio(
+        input: URL,
+        wavURL: URL,
+        runLog: TranscriptionRunLog?,
+        onProgress: @escaping @Sendable (Double) async -> Void,
+        onLog: @escaping @Sendable (String) async -> Void
+    ) async throws -> String {
+        let isNetworkVolume = (try? input.resourceValues(forKeys: [.volumeIsLocalKey]))?.volumeIsLocal == false
+        if isNetworkVolume {
+            await onLog(L.tr("transcription.network_volume", input.deletingLastPathComponent().path))
+        }
+
+        do {
+            try await AudioExtractor().extract(input: input, output: wavURL, onProgress: onProgress)
+            let description = "AVFoundation extract \(input.path) -> \(wavURL.path)"
+            await runLog?.append("\(Date().ISO8601Format()) command: \(description)")
+            return description
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            await onLog(L.tr("transcription.av_fallback", error.localizedDescription))
+        }
+
+        let arguments = [
+            "-f", "WAVE",
+            "-d", "LEI16@16000",
+            "-c", "1",
+            input.path,
+            wavURL.path,
+        ]
+        let result = try await TranscriptionRunLog.run(
+            executable: audioPreprocessorPath,
+            arguments: arguments,
+            log: runLog,
+            onOutput: { stream, line in
+                guard let filtered = CommandLogFilter.filteredLine(for: stream, tool: .audioPreprocessor, line: line) else {
+                    return
+                }
+                await onLog("[afconvert \(stream.label)] \(filtered)")
+            }
+        )
+        await onProgress(1)
+        return result.command
     }
 
     private func parseWhisperProgress(from line: String) -> Double? {

@@ -483,3 +483,10 @@
 "queue.state.working" = "In progress";
 "queue.state.done" = "Done";
 "queue.state.failed" = "Failed";
+"stage.extracting_audio_progress" = "Extracting audio %d%%";
+"transcription.network_volume" = "Source is on a network volume (%@); reading is limited by network speed.";
+"transcription.audio_prep_file_finished" = "Audio ready: %@ (%.1fs)";
+"transcription.av_fallback" = "AVFoundation could not read the file (%@); falling back to afconvert.";
+"audio.error.no_track" = "No audio track found in %@.";
+"audio.error.reader_failed" = "Could not read audio: %@";
+"audio.error.sample_buffer" = "Could not read an audio sample buffer.";

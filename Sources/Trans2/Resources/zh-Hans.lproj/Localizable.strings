@@ -483,3 +483,10 @@
 "queue.state.working" = "处理中";
 "queue.state.done" = "已完成";
 "queue.state.failed" = "失败";
+"stage.extracting_audio_progress" = "提取音频 %d%%";
+"transcription.network_volume" = "源文件在网络卷上（%@），读取速度受网络限制。";
+"transcription.audio_prep_file_finished" = "音频就绪：%@（%.1f 秒）";
+"transcription.av_fallback" = "AVFoundation 无法读取该文件（%@），改用 afconvert。";
+"audio.error.no_track" = "%@ 里没有音频轨道。";
+"audio.error.reader_failed" = "无法读取音频：%@";
+"audio.error.sample_buffer" = "读取音频采样失败。";
