@@ -81,6 +81,18 @@ final class AppModel: ObservableObject {
     @Published private(set) var pipelinedTranslatedFiles = 0
     @Published private(set) var lastRunTranslationWasEnabled = false
     @Published private(set) var lastRunTranslationTarget: Language = .zh
+    /// Segment-level progress of the file currently being translated.
+    @Published private(set) var activeCueProgress: CueProgress?
+    /// Start of the running batch; views tick elapsed time from it.
+    @Published private(set) var runStartedAt: Date?
+    /// Wall-clock duration of the last finished batch.
+    @Published private(set) var lastRunDuration: TimeInterval?
+    /// How many subtitle files the running batch has translated so far.
+    @Published private(set) var translatedFileCount = 0
+    /// Stems of queue files that already produced output in this run.
+    @Published private(set) var completedInputStems: Set<String> = []
+    /// Stems of queue files whose translation failed in this run.
+    @Published private(set) var failedInputStems: Set<String> = []
     @Published var logs: [String]
     @Published var isRunning = false
     @Published var isCancelling = false
@@ -324,6 +336,26 @@ final class AppModel: ObservableObject {
             translationModelReady: translationModelName.isEmpty == false,
             hasMediaInputs: !inputMediaFiles.isEmpty
         )
+    }
+
+    /// Badge shown next to a queue row while a batch runs or after it ends.
+    enum QueueFileState {
+        case working
+        case done
+        case failed
+    }
+
+    func queueState(for url: URL) -> QueueFileState? {
+        let stem = url.deletingPathExtension().lastPathComponent
+        if failedInputStems.contains(stem) { return .failed }
+        if completedInputStems.contains(stem) { return .done }
+        guard isRunning else { return nil }
+        let currentStem = (currentFileName as NSString).deletingPathExtension
+        if !currentStem.isEmpty, currentStem == stem { return .working }
+        // whisper transcribes a batch in one call, so every file that has not
+        // produced output yet is still being worked on.
+        if case .transcribingBatch = activePhase { return .working }
+        return nil
     }
 
     // MARK: - Updates
@@ -1012,6 +1044,11 @@ final class AppModel: ObservableObject {
         lastTranslationCount = 0
         lastTranslationFailureCount = 0
         pipelinedTranslatedFiles = 0
+        translatedFileCount = 0
+        activeCueProgress = nil
+        lastRunDuration = nil
+        completedInputStems = []
+        failedInputStems = []
         lastRunTranslationWasEnabled = translationSettings.isEnabled
         lastRunTranslationTarget = translationSettings.targetLanguage
         activeSnapshot = snapshot
@@ -1077,6 +1114,11 @@ final class AppModel: ObservableObject {
         let notifier = completionNotifier
         Task { await notifier.prepareForRun() }
         let runStartedAt = Date()
+        self.runStartedAt = runStartedAt
+        activeCueProgress = nil
+        translatedFileCount = 0
+        completedInputStems = []
+        failedInputStems = []
         clearPreviews()
         liveSegments = []
         logs.removeAll()
@@ -1237,7 +1279,11 @@ final class AppModel: ObservableObject {
                         case .transcribing:
                             self.activePhase = .transcribingBatch(totalFiles: totalFiles)
                             self.statusText = L.tr("stage.transcribing_batch", totalFiles)
-                            self.currentFileName = ""
+                            // A single-file batch can keep naming the file; a
+                            // multi-file batch has no per-file index to show.
+                            if totalFiles > 1 {
+                                self.currentFileName = ""
+                            }
                             self.currentStageDescription = stage.description
                             self.currentFileProgress = max(self.currentFileProgress, 0.18)
                         case .finished:
@@ -1305,6 +1351,7 @@ final class AppModel: ObservableObject {
                 appendLog(L.tr("log.whisper_command", whisperCommand))
             }
             for (index, report) in reports.enumerated() {
+                completedInputStems.insert(mediaInputs[index].deletingPathExtension().lastPathComponent)
                 appendLog(L.tr("log.completed_file", mediaInputs[index].lastPathComponent))
                 appendLog(L.tr("log.output_directory", batchInputs[index].outputDirectory.path))
                 appendLog(L.tr("log.audio_preparation_command", report.audioPreparationCommand))
@@ -1611,6 +1658,7 @@ final class AppModel: ObservableObject {
 
             if let report = fileReports.first {
                 reports.append(report)
+                completedInputStems.insert(input.deletingPathExtension().lastPathComponent)
                 if let srt = report.outputFiles.first(where: { $0.pathExtension.lowercased() == "srt" }) {
                     enqueue(srt)
                     try await drainIfNeeded()
@@ -1673,11 +1721,28 @@ final class AppModel: ObservableObject {
                     ? min(snapshot.translation.workers, Spec.defaultPolishWorkers)
                     : 1,
                 outputDirectory: outputDirectory,
-                onProgress: nil
+                onProgress: { cue in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.isRunning else { return }
+                        self.activeCueProgress = CueProgress(
+                            fileName: srt.lastPathComponent,
+                            stage: cue.stage,
+                            completed: cue.completed,
+                            total: cue.total,
+                            successCount: cue.successCount,
+                            errorCount: cue.errorCount
+                        )
+                        self.currentStageDescription = cue.stage == .translating
+                            ? L.tr("stage.translating_progress", cue.completed, cue.total)
+                            : L.tr("stage.polishing_progress", cue.completed, cue.total)
+                    }
+                }
             )
             lastTranslationCount += outcome.translatedCount
             lastTranslationFailureCount += outcome.errorCount
             pipelinedTranslatedFiles += 1
+            translatedFileCount += 1
+            completedInputStems.insert(srt.deletingPathExtension().lastPathComponent)
             appendLog(L.tr(
                 "translation.log.done",
                 outcome.outputURL.lastPathComponent,
@@ -1689,6 +1754,7 @@ final class AppModel: ObservableObject {
             return (nil, 1)
         } catch {
             lastTranslationFailureCount += 1
+            failedInputStems.insert(srt.deletingPathExtension().lastPathComponent)
             appendLog(L.tr("translation.log.failed", srt.lastPathComponent, error.localizedDescription))
             return (nil, 1)
         }
@@ -1729,6 +1795,15 @@ final class AppModel: ObservableObject {
                     onProgress: { cue in
                         Task { @MainActor [weak self] in
                             guard let self, self.isRunning else { return }
+                            let named = CueProgress(
+                                fileName: srt.lastPathComponent,
+                                stage: cue.stage,
+                                completed: cue.completed,
+                                total: cue.total,
+                                successCount: cue.successCount,
+                                errorCount: cue.errorCount
+                            )
+                            self.activeCueProgress = named
                             let fraction = cue.fraction
                             self.currentFileProgress = fraction
                             self.overallProgress = 0.85 + 0.15 * ((Double(index) + fraction) / Double(max(total, 1)))
@@ -1739,6 +1814,9 @@ final class AppModel: ObservableObject {
                     }
                 )
                 files.append(outcome.outputURL)
+                translatedFileCount += 1
+                completedInputStems.insert(srt.deletingPathExtension().lastPathComponent)
+                activeCueProgress = nil
                 lastTranslationCount += outcome.translatedCount
                 lastTranslationFailureCount += outcome.errorCount
                 appendLog(L.tr(
@@ -1752,6 +1830,7 @@ final class AppModel: ObservableObject {
             } catch {
                 failures += 1
                 lastTranslationFailureCount += 1
+                failedInputStems.insert(srt.deletingPathExtension().lastPathComponent)
                 appendLog(L.tr("translation.log.failed", srt.lastPathComponent, error.localizedDescription))
             }
         }
@@ -1927,6 +2006,11 @@ final class AppModel: ObservableObject {
         wasCancelled: Bool = false
     ) async {
         liveSegments = []
+        if let startedAt = runStartedAt {
+            lastRunDuration = Date().timeIntervalSince(startedAt)
+        }
+        runStartedAt = nil
+        activeCueProgress = nil
         isRunning = false
         isCancelling = false
         transcriptionTask = nil

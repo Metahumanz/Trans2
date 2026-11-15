@@ -297,17 +297,19 @@ struct PersistentActionBar: View {
                 // Bounds the ideal width so the bar's ViewThatFits only stacks
                 // when the row genuinely cannot fit, not on long file names.
                 .frame(maxWidth: 360, alignment: .leading)
-            HStack(spacing: 10) {
-                if phase == .stopping {
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    ProgressView(value: model.overallProgress)
-                        .frame(minWidth: 140, idealWidth: 220, maxWidth: 320)
-                    Text(progressCaption(phase))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                HStack(spacing: 10) {
+                    if phase == .stopping {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        ProgressView(value: model.overallProgress)
+                            .frame(minWidth: 140, idealWidth: 220, maxWidth: 320)
+                        Text(progressCaption(phase, now: context.date))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
             }
         }
@@ -342,19 +344,23 @@ struct PersistentActionBar: View {
 
     /// The bar is the 18% preprocessing / 82% whisper estimate; the caption
     /// keeps the "estimated" qualifier so 100% is never read as success.
-    private func progressCaption(_ phase: ActiveRunPhase) -> String {
+    private func progressCaption(_ phase: ActiveRunPhase, now: Date) -> String {
+        let base: String
         switch phase {
         case .preparingInputs:
-            return L.tr("bar.progress.estimated_percent", Int(model.overallProgress * 100))
+            base = L.tr("bar.progress.estimated_percent", Int((model.overallProgress * 100).rounded()))
         case .transcribingBatch:
-            return L.tr("bar.progress.estimated_percent", Int(model.currentTranscriptionProgress * 100))
+            base = L.tr("bar.progress.estimated_percent", Int((model.overallProgress * 100).rounded()))
         case .pipelined:
-            return L.tr("bar.progress.pipelined", Int(model.overallProgress * 100))
+            base = L.tr("bar.progress.pipelined", Int((model.overallProgress * 100).rounded()))
         case .translatingFiles:
-            return L.tr("bar.progress.translating_percent", Int(model.overallProgress * 100))
+            base = L.tr("bar.progress.translating_percent", Int((model.overallProgress * 100).rounded()))
         case .stopping:
             return ""
         }
+        guard let startedAt = model.runStartedAt else { return base }
+        let elapsed = max(0, now.timeIntervalSince(startedAt))
+        return L.tr("bar.progress.with_elapsed", base, formatRunDuration(elapsed))
     }
 
     private var downloadLeading: some View {

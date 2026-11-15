@@ -103,6 +103,10 @@ struct TaskSidebarView: View {
 
             Spacer(minLength: 0)
 
+            if let state = model.queueState(for: url) {
+                queueStateBadge(state)
+            }
+
             if !isLocked {
                 Button {
                     model.removeInputFile(url)
@@ -119,6 +123,26 @@ struct TaskSidebarView: View {
         .help(url.path)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text("\(url.lastPathComponent), \(url.deletingLastPathComponent().path)"))
+    }
+
+    @ViewBuilder
+    private func queueStateBadge(_ state: AppModel.QueueFileState) -> some View {
+        switch state {
+        case .working:
+            ProgressView()
+                .controlSize(.mini)
+                .accessibilityLabel(Text(L.tr("queue.state.working")))
+        case .done:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(Color(nsColor: .systemGreen))
+                .accessibilityLabel(Text(L.tr("queue.state.done")))
+        case .failed:
+            Image(systemName: "exclamationmark.octagon.fill")
+                .font(.caption)
+                .foregroundStyle(Color(nsColor: .systemRed))
+                .accessibilityLabel(Text(L.tr("queue.state.failed")))
+        }
     }
 
     private var queueFooter: some View {

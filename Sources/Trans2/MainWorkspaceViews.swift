@@ -1,4 +1,5 @@
 import SwiftUI
+import TransCore
 
 // MARK: - P0.2 main workspace views
 //
@@ -579,6 +580,290 @@ struct DownloadWorkspaceView: View {
 
 // MARK: - Running workspace
 
+/// Live progress for a running batch: overall bar with elapsed / ETA, a stage
+/// trail (prepare → transcribe → translate), the current file with its own
+/// bar, and segment-level counters while translating.
+struct RunStatusCard: View {
+    @EnvironmentObject private var model: AppModel
+    let phase: ActiveRunPhase
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            VStack(alignment: .leading, spacing: 12) {
+                overallRow(now: context.date)
+                stageTrail
+                currentFileRow
+                segmentRow
+                countsRow
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.primary.opacity(0.03))
+            )
+        }
+    }
+
+    // MARK: overall
+
+    private func overallRow(now: Date) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(L.tr("run.status.title"))
+                    .font(.system(size: UITypographyScale.scaled(13), weight: .semibold))
+                Spacer()
+                Text(percentText)
+                    .font(.system(.callout, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+
+            ProgressView(value: model.overallProgress)
+                .progressViewStyle(.linear)
+
+            HStack(spacing: 12) {
+                Label(elapsedText(now: now), systemImage: "clock")
+                    .labelStyle(.titleAndIcon)
+                if let eta = etaText(now: now) {
+                    Label(eta, systemImage: "hourglass")
+                }
+                Spacer(minLength: 0)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private var percentText: String {
+        "\(Int((model.overallProgress * 100).rounded()))%"
+    }
+
+    private func elapsedText(now: Date) -> String {
+        let elapsed: TimeInterval
+        if let startedAt = model.runStartedAt {
+            elapsed = now.timeIntervalSince(startedAt)
+        } else {
+            elapsed = model.lastRunDuration ?? 0
+        }
+        return L.tr("run.elapsed", formatRunDuration(elapsed))
+    }
+
+    /// Linear estimate from the overall fraction; hidden until there is enough
+    /// signal for it to be meaningful (avoids "0:02 left" on big files).
+    private func etaText(now: Date) -> String? {
+        guard let startedAt = model.runStartedAt, phase != .stopping else { return nil }
+        let elapsed = now.timeIntervalSince(startedAt)
+        let progress = model.overallProgress
+        guard elapsed > 5, progress > 0.03, progress < 0.995 else { return nil }
+        let remaining = elapsed * (1 - progress) / progress
+        guard remaining.isFinite, remaining > 0 else { return nil }
+        return L.tr("run.eta", formatRunDuration(remaining))
+    }
+
+    // MARK: stage trail
+
+    private var showsTranslationStage: Bool {
+        model.lastRunTranslationWasEnabled
+    }
+
+    private var stageTrail: some View {
+        HStack(spacing: 16) {
+            stageChip(L.tr("run.stage.prepare"), state: prepareState)
+            stageConnector(after: prepareState)
+            stageChip(L.tr("run.stage.transcribe"), state: transcribeState)
+            if showsTranslationStage {
+                stageConnector(after: transcribeState)
+                stageChip(L.tr("run.stage.translate"), state: translateState)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private enum StageState {
+        case pending
+        case active
+        case done
+    }
+
+    private var prepareState: StageState {
+        if case .preparingInputs = phase { return .active }
+        return .done
+    }
+
+    private var transcribeState: StageState {
+        switch phase {
+        case .preparingInputs:
+            return .pending
+        case .transcribingBatch:
+            return .active
+        case let .pipelined(currentIndex, totalFiles, _):
+            return currentIndex + 1 >= totalFiles ? .done : .active
+        case .translatingFiles, .stopping:
+            return .done
+        }
+    }
+
+    private var translateState: StageState {
+        switch phase {
+        case .preparingInputs, .transcribingBatch:
+            return .pending
+        case .pipelined, .translatingFiles, .stopping:
+            return .active
+        }
+    }
+
+    private func stageChip(_ title: String, state: StageState) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon(for: state))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(color(for: state))
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(state == .pending ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text("\(title)：\(accessibilityState(state))"))
+    }
+
+    private func icon(for state: StageState) -> String {
+        switch state {
+        case .done: return "checkmark.circle.fill"
+        case .active: return "circle.dotted"
+        case .pending: return "circle"
+        }
+    }
+
+    private func color(for state: StageState) -> Color {
+        switch state {
+        case .done: return Color(nsColor: .systemGreen)
+        case .active: return Color.accentColor
+        case .pending: return Color(nsColor: .tertiaryLabelColor)
+        }
+    }
+
+    private func accessibilityState(_ state: StageState) -> String {
+        switch state {
+        case .done: return L.tr("run.stage.done")
+        case .active: return L.tr("run.stage.active")
+        case .pending: return L.tr("run.stage.pending")
+        }
+    }
+
+    private func stageConnector(after state: StageState) -> some View {
+        Rectangle()
+            .fill(state == .done ? Color(nsColor: .systemGreen).opacity(0.4) : Color(nsColor: .separatorColor))
+            .frame(width: 18, height: 1)
+    }
+
+    // MARK: current file
+
+    @ViewBuilder
+    private var currentFileRow: some View {
+        if !model.currentFileName.isEmpty {
+            currentFileBody
+        }
+    }
+
+    private var currentFileBody: some View {
+        let fraction = min(max(model.currentFileProgress, 0), 1)
+        return VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 8) {
+                Text(L.tr("run.current_file"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(model.currentFileName)
+                    .font(.system(size: UITypographyScale.scaled(13), weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 0)
+                Text("\(Int((fraction * 100).rounded()))%")
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            ProgressView(value: fraction)
+                .progressViewStyle(.linear)
+                .tint(Color.accentColor)
+            if !model.currentStageDescription.isEmpty {
+                Text(model.currentStageDescription)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    // MARK: segments
+
+    @ViewBuilder
+    private var segmentRow: some View {
+        if let cue = model.activeCueProgress {
+            segmentBody(cue)
+        }
+    }
+
+    private func segmentBody(_ cue: CueProgress) -> some View {
+        HStack(spacing: 12) {
+            Label(
+                L.tr("run.segments", cue.completed, cue.total),
+                systemImage: cue.stage == .translating ? "text.bubble" : "wand.and.stars"
+            )
+            Text(L.tr("run.segment_counts", cue.successCount, cue.errorCount))
+            if cue.errorCount > 0 {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(Color(nsColor: .systemOrange))
+            }
+            Spacer(minLength: 0)
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+    }
+
+    // MARK: counts
+
+    private var countsRow: some View {
+        HStack(spacing: 12) {
+            Label(filePositionText, systemImage: "doc.on.doc")
+            if showsTranslationStage, model.translatedFileCount > 0 {
+                Label(
+                    L.tr("run.translated_files", model.translatedFileCount),
+                    systemImage: "character.book.closed"
+                )
+            }
+            Spacer(minLength: 0)
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+    }
+
+    private var filePositionText: String {
+        let total = model.activeSnapshot?.inputFiles.count ?? 0
+        switch phase {
+        case let .preparingInputs(currentIndex, phaseTotal):
+            return L.tr("run.files_progress", min(currentIndex + 1, max(phaseTotal, 1)), max(phaseTotal, 1))
+        case let .transcribingBatch(phaseTotal):
+            return L.tr("run.files_total", phaseTotal)
+        case let .pipelined(currentIndex, phaseTotal, _):
+            return L.tr("run.files_progress", min(currentIndex + 1, max(phaseTotal, 1)), max(phaseTotal, 1))
+        case let .translatingFiles(currentIndex, phaseTotal):
+            return L.tr("run.files_progress", min(currentIndex + 1, max(phaseTotal, 1)), max(phaseTotal, 1))
+        case .stopping:
+            return L.tr("run.files_total", max(total, 1))
+        }
+    }
+}
+
+/// `m:ss` under an hour, `h:mm:ss` above it.
+func formatRunDuration(_ seconds: TimeInterval) -> String {
+    let total = Int(max(0, seconds).rounded())
+    let hours = total / 3600
+    let minutes = (total % 3600) / 60
+    let secs = total % 60
+    if hours > 0 {
+        return String(format: "%d:%02d:%02d", hours, minutes, secs)
+    }
+    return String(format: "%d:%02d", minutes, secs)
+}
+
 struct RunWorkspaceView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.windowSizeMode) private var windowSizeMode
@@ -634,11 +919,13 @@ struct RunWorkspaceView: View {
         .onGeometryChange(for: CGSize.self, of: { $0.size }) { workspaceHeight = $0.height }
     }
 
-    /// Title + frozen task details, measured together as the non-viewport
-    /// header content; re-measures itself when the disclosure expands.
+    /// Title + live progress + frozen task details, measured together as the
+    /// non-viewport header content; re-measures itself when anything expands.
     private var headerBlock: some View {
         VStack(alignment: .leading, spacing: TaskWorkspaceMetrics.sectionSpacing) {
             titleBlock
+
+            RunStatusCard(phase: phase)
 
             if let snapshot = model.activeSnapshot {
                 snapshotDisclosure(snapshot)
@@ -890,6 +1177,15 @@ struct RunResultView: View {
                     .font(.system(size: UITypographyScale.scaled(22), weight: .semibold))
                 Text(L.tr("result.success.detail", inputFileCount, outputFiles.count))
                     .foregroundStyle(.secondary)
+            }
+
+            if let duration = model.lastRunDuration {
+                Label(
+                    L.tr("result.duration", formatRunDuration(duration)),
+                    systemImage: "clock"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
 
             if model.lastRunTranslationWasEnabled {

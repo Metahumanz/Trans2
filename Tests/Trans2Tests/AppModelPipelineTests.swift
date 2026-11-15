@@ -315,5 +315,14 @@ extension AppModelPipelineTests {
         let translated = root.appending(path: "clip_zh_sub.srt")
         #expect(FileManager.default.fileExists(atPath: translated.path))
         #expect(model.lastRunOutputFiles.contains(translated))
+
+        // Progress bookkeeping the status card reads.
+        #expect(model.translatedFileCount == 1)
+        #expect(model.completedInputStems.contains("clip"))
+        #expect(model.failedInputStems.isEmpty)
+        #expect(model.runStartedAt == nil)
+        #expect((model.lastRunDuration ?? 0) > 0)
+        #expect(model.queueState(for: source) == .done)
+        #expect(model.activeCueProgress == nil)
     }
 }

@@ -38,6 +38,7 @@
 - **沿用 WhisperMac 的运行时**：优先复用 `~/Library/Application Support/WhisperMac/` 里已有的 whisper-cli、模型、Core ML encoder 和 Silero VAD 模型，不重复下载 1.5 GB。
 - **应用内检查更新**：启动时可选自动检查 GitHub Releases；发现新版本可下载 dmg/zip 或打开发布页。
 - **三语界面**：English / 简体中文 / 日本語，跟随系统或手动切换。
+- **细粒度进度与状态**：运行中显示整体进度条、用时与预计剩余、准备 / 转写 / 翻译阶段轨迹、当前文件及其进度、分段成功与失败计数、已翻译文件数；队列里每个文件带「处理中 / 已完成 / 失败」状态标记；结束后显示总耗时。
 
 ## 界面
 
