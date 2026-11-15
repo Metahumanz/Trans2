@@ -167,6 +167,24 @@ struct TranscriptionService {
             await onLog(L.tr("transcription.network_volume", input.deletingLastPathComponent().path))
         }
 
+        // ISO base media files can skip most of the video bytes when the audio
+        // is muxed in coarse runs; fall through to AVFoundation otherwise.
+        do {
+            if let description = try await extractWithISODemuxer(
+                input: input,
+                wavURL: wavURL,
+                runLog: runLog,
+                onProgress: onProgress,
+                onLog: onLog
+            ) {
+                return description
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            await onLog(L.tr("transcription.demux_fallback", error.localizedDescription))
+        }
+
         do {
             try await AudioExtractor().extract(input: input, output: wavURL, onProgress: onProgress)
             let description = "AVFoundation extract \(input.path) -> \(wavURL.path)"
@@ -198,6 +216,83 @@ struct TranscriptionService {
         )
         await onProgress(1)
         return result.command
+    }
+
+    /// Returns nil when the file is not a supported ISO container, so the
+    /// caller can fall back without treating it as an error.
+    private func extractWithISODemuxer(
+        input: URL,
+        wavURL: URL,
+        runLog: TranscriptionRunLog?,
+        onProgress: @escaping @Sendable (Double) async -> Void,
+        onLog: @escaping @Sendable (String) async -> Void
+    ) async throws -> String? {
+        let isoExtensions: Set<String> = ["mp4", "m4v", "mov", "m4a"]
+        guard isoExtensions.contains(input.pathExtension.lowercased()) else { return nil }
+
+        let track: ISOAudioTrack
+        do {
+            track = try ISOAudioDemuxer.readTrack(from: input)
+            _ = try track.adtsParameters()
+        } catch ISOAudioError.unsupportedCodec(let codec) {
+            await onLog(L.tr("transcription.demux_unsupported", codec))
+            return nil
+        }
+
+        let fileSize = Int64((try? FileManager.default.attributesOfItem(atPath: input.path)[.size] as? Int) ?? 0)
+        let plan = ISOAudioDemuxer.plan(for: track, fileSize: fileSize)
+        let aacURL = FileManager.default.temporaryDirectory
+            .appending(path: "trans2-audio-\(UUID().uuidString).aac")
+        defer { try? FileManager.default.removeItem(at: aacURL) }
+
+        await onLog(L.tr(
+            "transcription.demux_plan",
+            planName(plan),
+            track.totalAudioBytes / 1024,
+            fileSize / 1024
+        ))
+
+        let startedAt = Date()
+        let result = try await ISOAudioDemuxer.extract(
+            track: track,
+            from: input,
+            to: aacURL,
+            plan: plan,
+            onProgress: onProgress
+        )
+        await onLog(L.tr(
+            "transcription.demux_extracted",
+            result.plan,
+            result.bytesRead / 1024,
+            result.frames,
+            Date().timeIntervalSince(startedAt)
+        ))
+
+        let decode = try await TranscriptionRunLog.run(
+            executable: audioPreprocessorPath,
+            arguments: ["-f", "WAVE", "-d", "LEI16@16000", "-c", "1", aacURL.path, wavURL.path],
+            log: runLog,
+            onOutput: { stream, line in
+                guard let filtered = CommandLogFilter.filteredLine(
+                    for: stream,
+                    tool: .audioPreprocessor,
+                    line: line
+                ) else { return }
+                await onLog("[afconvert \(stream.label)] \(filtered)")
+            }
+        )
+        let outputSize = (try? FileManager.default.attributesOfItem(atPath: wavURL.path)[.size]) as? Int ?? 0
+        guard decode.exitCode == 0, outputSize > 0 else {
+            throw ISOAudioError.decodeFailed("afconvert exit \(decode.exitCode)")
+        }
+        return "ISO demux (\(result.plan)) \(input.path) -> \(wavURL.path)"
+    }
+
+    private func planName(_ plan: ISOAudioDemuxer.Plan) -> String {
+        switch plan {
+        case let .selective(ranges, _): return "selective(\(ranges.count) reads)"
+        case .sequential: return "sequential"
+        }
     }
 
     private func parseWhisperProgress(from line: String) -> Double? {

@@ -490,3 +490,12 @@
 "audio.error.no_track" = "%@ に音声トラックがありません。";
 "audio.error.reader_failed" = "音声を読み取れません: %@";
 "audio.error.sample_buffer" = "音声サンプルの読み取りに失敗しました。";
+"audio.error.not_iso" = "MP4/MOV コンテナではありません。";
+"audio.error.codec" = "未対応の音声コーデック: %@";
+"audio.error.layout" = "未対応のコンテナ構造: %@";
+"audio.error.decode" = "音声のデコードに失敗しました: %@";
+"audio.error.read" = "メディアファイルを読み取れません: %@";
+"transcription.demux_fallback" = "高速な音声抽出を利用できません（%@）。AVFoundation に切り替えます。";
+"transcription.demux_unsupported" = "高速抽出をスキップ: %@ は未対応。AVFoundation に切り替えます。";
+"transcription.demux_plan" = "音声抽出の方針: %@（音声 %d KB / ファイル %d KB）";
+"transcription.demux_extracted" = "音声抽出完了: %@、%d KB 読み取り、%d フレーム、%.1f 秒";

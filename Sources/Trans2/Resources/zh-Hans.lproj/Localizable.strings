@@ -490,3 +490,12 @@
 "audio.error.no_track" = "%@ 里没有音频轨道。";
 "audio.error.reader_failed" = "无法读取音频：%@";
 "audio.error.sample_buffer" = "读取音频采样失败。";
+"audio.error.not_iso" = "不是 MP4/MOV 容器。";
+"audio.error.codec" = "不支持的音频编码：%@";
+"audio.error.layout" = "不支持的容器结构：%@";
+"audio.error.decode" = "音频解码失败：%@";
+"audio.error.read" = "无法读取媒体文件：%@";
+"transcription.demux_fallback" = "快速提取不可用（%@），改用 AVFoundation。";
+"transcription.demux_unsupported" = "跳过快速提取：不支持 %@，改用 AVFoundation。";
+"transcription.demux_plan" = "音频提取方案：%@（音频 %d KB / 文件 %d KB）";
+"transcription.demux_extracted" = "音频提取完成：%@，读取 %d KB，%d 帧，%.1f 秒";

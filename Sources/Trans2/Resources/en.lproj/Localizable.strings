@@ -490,3 +490,12 @@
 "audio.error.no_track" = "No audio track found in %@.";
 "audio.error.reader_failed" = "Could not read audio: %@";
 "audio.error.sample_buffer" = "Could not read an audio sample buffer.";
+"audio.error.not_iso" = "Not an MP4/MOV container.";
+"audio.error.codec" = "Unsupported audio codec: %@";
+"audio.error.layout" = "Unsupported layout: %@";
+"audio.error.decode" = "Audio decode failed: %@";
+"audio.error.read" = "Could not read the media file: %@";
+"transcription.demux_fallback" = "Fast audio path unavailable (%@); using AVFoundation.";
+"transcription.demux_unsupported" = "Fast audio path skipped: %@ is not supported; using AVFoundation.";
+"transcription.demux_plan" = "Audio plan: %@ (audio %d KB / file %d KB)";
+"transcription.demux_extracted" = "Audio extracted: %@, read %d KB, %d frames, %.1fs";
